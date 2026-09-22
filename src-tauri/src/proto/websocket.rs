@@ -45,7 +45,7 @@ async fn run(
 
     let (ws, _) = tokio_tungstenite::connect_async(&url)
         .await
-        .map_err(|e| format!("connect_failed:{e}"))?;
+        .map_err(crate::proto::map_connect)?;
     emit_status(&app, session_id, "connected", None);
 
     let (mut sink, mut stream) = ws.split();

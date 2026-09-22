@@ -125,9 +125,9 @@ async fn run(
                     }
                     Err(err) => {
                         if connected {
-                            return Err(err.to_string());
+                            return Err(crate::proto::map_io(&err));
                         }
-                        return Err(format!("connect_failed:{err}"));
+                        return Err(crate::proto::map_connect(&err));
                     }
                     _ => {}
                 }

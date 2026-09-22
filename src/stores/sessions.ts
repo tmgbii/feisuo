@@ -452,7 +452,7 @@ export const useSessionsStore = defineStore("sessions", () => {
     if (status === "connected") {
       void restoreMqttSubs(id);
     } else if (status === "error") {
-      toast.error(error || t("err.sessionError", { name: session.name }));
+      toast.error(error ? errorMessage(error) : t("err.sessionError", { name: session.name }));
     }
   }
 

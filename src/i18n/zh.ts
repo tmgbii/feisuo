@@ -832,6 +832,7 @@ export const zh = {
     serial_unplugged: "串口已拔出",
     not_mqtt: "不是 MQTT 配置",
     broker_gone: "Broker 断开",
+    local_network: "局域网权限未开或无路由",
     connectFailed: "连接失败: {detail}",
     not_ws: "不是 WebSocket 配置",
     closed: "连接已关闭",

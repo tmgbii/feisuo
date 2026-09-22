@@ -32,6 +32,7 @@ pub fn run() {
         .manage(db::DbState::new())
         .manage(netdiag::NetdiagState::new())
         .setup(|app| {
+            probe_local_network();
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 proto::serial::watch_ports(handle).await;
@@ -131,6 +132,19 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running 飞梭");
+}
+
+fn probe_local_network() {
+    #[cfg(target_os = "macos")]
+    {
+        // hostName 在本进程触发「本地网络」对话框；组播作补。
+        let _ = objc2_foundation::NSProcessInfo::processInfo().hostName();
+        let _ = std::thread::spawn(|| {
+            if let Ok(sock) = std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)) {
+                let _ = sock.send_to(&[0u8], "224.0.0.251:5353");
+            }
+        });
+    }
 }
 
 fn hide_main(app: &tauri::AppHandle) {

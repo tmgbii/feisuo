@@ -834,6 +834,7 @@ export const en: Dict = {
     serial_unplugged: "Serial unplugged",
     not_mqtt: "Not an MQTT config",
     broker_gone: "Broker gone",
+    local_network: "No route, or Local Network permission off",
     connectFailed: "Connect failed: {detail}",
     not_ws: "Not a WebSocket config",
     closed: "Closed",

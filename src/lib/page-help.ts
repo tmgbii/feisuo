@@ -140,7 +140,10 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
     sections: [
       {
         title: "连接",
-        lines: ["Client ID 空则每次连接随机，避免拷到其它电脑互踢。用户密码按 Broker 要求。"],
+        lines: [
+          "Client ID 空则每次连接随机，避免拷到其它电脑互踢。用户密码按 Broker 要求。",
+          "macOS 15+ 连局域网需打开「本地网络」权限。",
+        ],
         examples: [
           {
             caption: "本机 Mosquitto：",
@@ -504,7 +507,10 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
     sections: [
       {
         title: "Connect",
-        lines: ["Empty Client ID is random each connect, so copies on other PCs don't collide. User/password as the Broker requires."],
+        lines: [
+          "Empty Client ID is random each connect, so copies on other PCs don't collide. User/password as the Broker requires.",
+          "macOS 15+ needs Local Network permission for LAN brokers.",
+        ],
         examples: [
           {
             caption: "Local Mosquitto:",

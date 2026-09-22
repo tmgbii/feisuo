@@ -11,6 +11,25 @@ pub mod tcp;
 pub mod udp;
 pub mod websocket;
 
+pub fn map_io(err: impl std::fmt::Display) -> String {
+    let s = err.to_string();
+    let low = s.to_lowercase();
+    if low.contains("no route to host") || low.contains("host is unreachable") {
+        "local_network".into()
+    } else {
+        s
+    }
+}
+
+pub fn map_connect(err: impl std::fmt::Display) -> String {
+    let mapped = map_io(err);
+    if mapped == "local_network" {
+        mapped
+    } else {
+        format!("connect_failed:{mapped}")
+    }
+}
+
 pub fn emit_status(app: &AppHandle, session_id: &str, status: &str, error: Option<String>) {
     let _ = app.emit(
         "comm:status",

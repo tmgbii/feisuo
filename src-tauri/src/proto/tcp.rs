@@ -49,7 +49,7 @@ async fn run_client(
     };
     let mut stream = TcpStream::connect((host.as_str(), port))
         .await
-        .map_err(|e| format!("connect_failed:{e}"))?;
+        .map_err(crate::proto::map_connect)?;
     let _ = stream.set_nodelay(true);
     emit_status(&app, session_id, "connected", None);
 

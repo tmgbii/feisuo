@@ -44,9 +44,13 @@ sqlx = { version = "0.8", default-features = false, features = [
   "json",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3.2", features = ["NSProcessInfo", "NSString"] }
+
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
-strip = true
+# debuginfo：macOS 本地网络权限靠 Mach-O UUID，strip=true 会剥掉。
+strip = "debuginfo"

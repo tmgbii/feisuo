@@ -40,5 +40,9 @@ rm -rf out/飞梭.app out/Feisuo.app
 rm -f out/Feisuo out/飞梭.dmg out/Feisuo.dmg
 ditto "$APP_SRC" out/飞梭.app
 cp -f "$DMG_SRC" out/飞梭.dmg
+BIN=$(find out/飞梭.app/Contents/MacOS -type f | head -1)
+if command -v dwarfdump >/dev/null && [[ -n "$BIN" ]]; then
+  dwarfdump --uuid "$BIN" || echo "WARN: 无 Mach-O UUID，本地网络权限会失效"
+fi
 echo "OK  $(pwd)/out/飞梭.app  $(du -sh out/飞梭.app | awk '{print $1}')"
 echo "OK  $(pwd)/out/飞梭.dmg  $(du -sh out/飞梭.dmg | awk '{print $1}')"

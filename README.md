@@ -1,3 +1,4 @@
+> 关键词 / Keywords：串口调试 serial-port · 网络调试 network-tools · Modbus · MQTT · SSH · 协议解析 protocol-analyzer · 跨平台 cross-platform · Tauri · Rust
 
 # Feisuo
 

@@ -56,6 +56,14 @@ const ERR_PREFIX: [string, string, string][] = [
 ];
 
 export function translateError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (
+    raw === "local_network" ||
+    lower.includes("no route to host") ||
+    lower.includes("host is unreachable")
+  ) {
+    return t("err.local_network");
+  }
   const keyed = lookup(resolvedLocale.value === "en" ? en : zh, `err.${raw}`) ?? lookup(zh, `err.${raw}`);
   if (keyed) return keyed;
   for (const [prefix, key, name] of ERR_PREFIX) {
