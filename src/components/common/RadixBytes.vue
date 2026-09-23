@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { HTMLAttributes } from "vue";
-import { bytesToHex, hexToBytes } from "@/lib/hex";
+import { bytesToHex, hexToBytes, takeHexPaste } from "@/lib/hex";
 import { toggleRadix, type NumericRadix } from "@/lib/radix";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,6 +11,7 @@ const props = defineProps<{
   modelValue: string;
   placeholder?: string;
   class?: HTMLAttributes["class"];
+  formatPaste?: (text: string) => string | null;
 }>();
 
 const emit = defineEmits<{
@@ -53,8 +54,8 @@ watch(
 );
 
 function onFocus() {
+  draft.value = radix.value === "HEX" ? props.modelValue : toDec(props.modelValue);
   focused.value = true;
-  draft.value = shown.value;
 }
 
 function commit(raw: string) {
@@ -67,10 +68,45 @@ function commit(raw: string) {
   emit("update:modelValue", hex);
 }
 
+function onInput(raw: string) {
+  draft.value = raw;
+  commit(raw);
+}
+
+function onPaste(event: ClipboardEvent) {
+  if (radix.value !== "HEX") return;
+  const clip = event.clipboardData?.getData("text") ?? "";
+  const el = event.target as HTMLTextAreaElement | null;
+  const current = shown.value;
+  const start = el?.selectionStart ?? current.length;
+  const end = el?.selectionEnd ?? start;
+  const merged = current.slice(0, start) + clip + current.slice(end);
+  if (props.formatPaste && merged.trim().startsWith(":")) {
+    const text = props.formatPaste(merged);
+    if (text) {
+      event.preventDefault();
+      draft.value = text;
+      commit(text);
+      void nextTick(() => el?.setSelectionRange(text.length, text.length));
+      return;
+    }
+  }
+  const next = takeHexPaste(event, shown.value);
+  if (!next) return;
+  event.preventDefault();
+  draft.value = next.text;
+  commit(next.text);
+  void nextTick(() => el?.setSelectionRange(next.caret, next.caret));
+}
+
 function onBlur() {
   commit(draft.value);
   focused.value = false;
 }
+
+onBeforeUnmount(() => {
+  if (focused.value) commit(draft.value);
+});
 
 function onToggle() {
   let hex = props.modelValue;
@@ -97,7 +133,8 @@ function onToggle() {
       class="min-h-16 pr-10 font-mono text-[12px]"
       @focus="onFocus"
       @blur="onBlur"
-      @update:model-value="draft = String($event)"
+      @update:model-value="onInput(String($event))"
+      @paste="onPaste"
     />
     <RadixToggle
       class="absolute top-2 right-2 z-10"

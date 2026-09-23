@@ -11,6 +11,7 @@ import {
   invokeMqttSub,
   invokeMqttUnsub,
   invokeSend,
+  invokeUiAlive,
   isTauri,
   errorMessage,
 } from "@/lib/ipc";
@@ -66,6 +67,7 @@ interface RxFramePayload {
 interface RxBatchPayload {
   sessionId: string;
   frames: RxFramePayload[];
+  dropped?: number;
 }
 
 interface StatusPayload {
@@ -573,6 +575,52 @@ export const useSessionsStore = defineStore("sessions", () => {
     session.lastActiveAt = Date.now();
   }
 
+  function pushRxBatch(sessionId: string, frames: RxFramePayload[], dropped: number) {
+    const session = sessions.value.find((s) => s.id === sessionId);
+    if (!session) return;
+    const list = messages[sessionId] ?? (messages[sessionId] = []);
+    const added: LogMessage[] = [];
+    let rxBytes = 0;
+    for (const frame of frames) {
+      const topic = frame.topic ?? undefined;
+      if (topic && isMqttTopicPaused(sessionId, topic)) continue;
+      const bytes = asBytes(frame.data);
+      rxBytes += bytes.length;
+      added.push({
+        id: crypto.randomUUID(),
+        sessionId,
+        direction: "rx",
+        timestamp: frame.timestamp ?? Date.now(),
+        hex: bytesToHex(bytes),
+        ascii: bytesToText(bytes),
+        byteLength: bytes.length,
+        sourceLabel: frame.source ?? undefined,
+        color: frame.color ?? (topic ? mqttTopicColor(topic) : undefined),
+        topic,
+      });
+    }
+    if (dropped > 0) {
+      const note = t("stream.rxDropped", { n: dropped });
+      added.push({
+        id: crypto.randomUUID(),
+        sessionId,
+        direction: "error",
+        timestamp: Date.now(),
+        hex: "",
+        ascii: note,
+        byteLength: 0,
+      });
+    }
+    if (!added.length) return;
+    list.push(...added);
+    if (list.length > ui.settings.logLimit) {
+      list.splice(0, list.length - ui.settings.logLimit);
+    }
+    session.rxBytes += rxBytes;
+    session.rxFrames += added.filter((m) => m.direction === "rx").length + dropped;
+    session.lastActiveAt = Date.now();
+  }
+
   function rememberHistory(session: Session, content: string, mode: DataMode) {
     const last = history.value[0];
     if (!last || last.content !== content || last.mode !== mode) {
@@ -668,6 +716,10 @@ export const useSessionsStore = defineStore("sessions", () => {
   function clearMessages(id: string) {
     messages[id] = [];
     selectedIds[id] = [];
+  }
+
+  function clearHistory() {
+    history.value = [];
   }
 
   const selectedCount = computed(() => {
@@ -922,20 +974,44 @@ export const useSessionsStore = defineStore("sessions", () => {
     if (bound) return;
     bound = true;
     if (!isTauri()) return;
+    const pending = new Map<string, { frames: RxFramePayload[]; dropped: number }>();
+    const keep = 120;
+    let raf = 0;
+    const flushPending = () => {
+      raf = 0;
+      const entries = [...pending.entries()];
+      pending.clear();
+      for (const [id, slot] of entries) {
+        pushRxBatch(id, slot.frames, slot.dropped);
+      }
+    };
+    const pump = window.setInterval(() => {
+      void invokeUiAlive();
+    }, 1000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") void invokeUiAlive();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    void invokeUiAlive();
+    unlisteners.push(() => {
+      window.clearInterval(pump);
+      document.removeEventListener("visibilitychange", onVis);
+      if (raf) window.cancelAnimationFrame(raf);
+      pending.clear();
+    });
     const { listen } = await import("@tauri-apps/api/event");
     unlisteners.push(
       await listen<RxBatchPayload>("comm:rx", (event) => {
         const payload = event.payload;
-        for (const frame of payload.frames ?? []) {
-          const topic = frame.topic ?? undefined;
-          if (topic && isMqttTopicPaused(payload.sessionId, topic)) continue;
-          pushMessage(payload.sessionId, "rx", asBytes(frame.data), {
-            timestamp: frame.timestamp,
-            sourceLabel: frame.source ?? undefined,
-            color: frame.color ?? undefined,
-            topic,
-          });
+        const slot = pending.get(payload.sessionId) ?? { frames: [], dropped: 0 };
+        slot.dropped += payload.dropped ?? 0;
+        slot.frames.push(...(payload.frames ?? []));
+        if (slot.frames.length > keep) {
+          slot.dropped += slot.frames.length - keep;
+          slot.frames.splice(0, slot.frames.length - keep);
         }
+        pending.set(payload.sessionId, slot);
+        if (!raf) raf = requestAnimationFrame(flushPending);
       }),
     );
     unlisteners.push(
@@ -1082,6 +1158,7 @@ export const useSessionsStore = defineStore("sessions", () => {
     resend,
     resendHistory,
     clearMessages,
+    clearHistory,
     resetCounters,
     selectedIds,
     selectedCount,

@@ -38,18 +38,24 @@ function patch(data: Partial<DbConfig>) {
 
 function setEngine(value: string) {
   if (locked.value) return;
-  const engine = (value === "mysql" || value === "sqlite" ? value : "postgres") as DbEngine;
+  const engine = (
+    value === "mysql" || value === "sqlite" || value === "sqlserver" ? value : "postgres"
+  ) as DbEngine;
   const next: Partial<DbConfig> = { engine };
   if (engine !== "sqlite") {
     const prevDefault = dbDefaultPort(cfg.value.engine);
     if (cfg.value.port === prevDefault || !cfg.value.port) {
       next.port = dbDefaultPort(engine);
     }
-    if (engine === "postgres" && (cfg.value.user === "root" || !cfg.value.user)) {
+    const user = cfg.value.user;
+    if (engine === "postgres" && (user === "root" || user === "sa" || !user)) {
       next.user = "postgres";
     }
-    if (engine === "mysql" && (cfg.value.user === "postgres" || !cfg.value.user)) {
+    if (engine === "mysql" && (user === "postgres" || user === "sa" || !user)) {
       next.user = "root";
+    }
+    if (engine === "sqlserver" && (user === "postgres" || user === "root" || !user)) {
+      next.user = "sa";
     }
   }
   patch(next);
@@ -76,6 +82,7 @@ function onUseDb(value: string) {
         :options="[
           { value: 'postgres', label: 'PostgreSQL' },
           { value: 'mysql', label: 'MySQL' },
+          { value: 'sqlserver', label: 'SQL Server' },
           { value: 'sqlite', label: 'SQLite' },
         ]"
         @update:model-value="setEngine"

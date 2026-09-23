@@ -2,6 +2,34 @@ export function compactHex(input: string): string {
   return input.replace(/\s+/g, "");
 }
 
+/** Turn a hex dump into uppercase bytes. Null when the text is not hex. */
+export function formatHexDump(input: string): string | null {
+  const stripped = input.replace(/0x/gi, "");
+  const junk = stripped.replace(/[0-9a-fA-F]/g, "");
+  if (junk && !/^[\s,;:._-]*$/.test(junk)) return null;
+  const compact = stripped.replace(/[^0-9a-fA-F]/g, "");
+  if (compact.length < 2) return null;
+  return compact.toUpperCase().match(/.{1,2}/g)!.join(" ");
+}
+
+export function takeHexPaste(
+  event: ClipboardEvent,
+  current: string,
+): { text: string; caret: number } | null {
+  const clip = event.clipboardData?.getData("text");
+  if (!clip) return null;
+  const el = event.target as HTMLTextAreaElement | HTMLInputElement | null;
+  const start = el?.selectionStart ?? current.length;
+  const end = el?.selectionEnd ?? start;
+  const text = formatHexDump(current.slice(0, start) + clip + current.slice(end));
+  if (text == null) return null;
+  const digits =
+    current.slice(0, start).replace(/0x/gi, "").replace(/[^0-9a-fA-F]/g, "").length +
+    clip.replace(/0x/gi, "").replace(/[^0-9a-fA-F]/g, "").length;
+  const caret = digits + (digits > 0 ? Math.floor((digits - 1) / 2) : 0);
+  return { text, caret };
+}
+
 export function isValidHex(input: string): boolean {
   const compact = compactHex(input);
   if (!compact) return false;

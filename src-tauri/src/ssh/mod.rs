@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -495,16 +495,14 @@ async fn run_pty(
         tokio::select! {
             _ = cancel.cancelled() => break,
             _ = tick.tick() => {
-                if !buf.is_empty() {
-                    let _ = app.emit("ssh:rx", SshRx { session_id: session_id.clone(), data: std::mem::take(&mut buf) });
-                }
+                emit_ssh_rx(&app, &session_id, &mut buf);
             }
             msg = read.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) | Some(ChannelMsg::ExtendedData { ref data, .. }) => {
                         buf.extend_from_slice(data);
                         if buf.len() >= 32 * 1024 {
-                            let _ = app.emit("ssh:rx", SshRx { session_id: session_id.clone(), data: std::mem::take(&mut buf) });
+                            emit_ssh_rx(&app, &session_id, &mut buf);
                         }
                     }
                     Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
@@ -523,6 +521,26 @@ async fn run_pty(
         );
     }
     emit_status(&app, &session_id, "disconnected", Some("disconnected".into()));
+}
+
+fn emit_ssh_rx(app: &AppHandle, session_id: &str, buf: &mut Vec<u8>) {
+    if buf.is_empty() {
+        return;
+    }
+    if app.state::<crate::state::AppState>().ui_stale() {
+        const KEEP: usize = 64 * 1024;
+        if buf.len() > KEEP {
+            buf.drain(0..buf.len() - KEEP);
+        }
+        return;
+    }
+    let _ = app.emit(
+        "ssh:rx",
+        SshRx {
+            session_id: session_id.to_string(),
+            data: std::mem::take(buf),
+        },
+    );
 }
 
 async fn live_of(state: &SshState, id: &str) -> Result<Arc<LiveSsh>, String> {

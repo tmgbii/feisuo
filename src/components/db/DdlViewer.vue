@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, placeholder } from "@codemirror/view";
+import { EditorView, lineNumbers } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { sql, PostgreSQL, MySQL, SQLite, MSSQL } from "@codemirror/lang-sql";
 import { cmHighlight, cmTheme } from "@/lib/codemirror";
 import type { DbEngine } from "@/types";
@@ -11,11 +10,6 @@ import { useUiStore } from "@/stores/ui";
 const props = defineProps<{
   modelValue: string;
   dialect: DbEngine;
-}>();
-
-const emit = defineEmits<{
-  "update:modelValue": [value: string];
-  run: [sql: string];
 }>();
 
 const host = ref<HTMLDivElement | null>(null);
@@ -30,12 +24,6 @@ function dialectExt(engine: DbEngine) {
   return sql({ dialect });
 }
 
-function sqlToRun(ed: EditorView): string {
-  const sel = ed.state.selection.main;
-  const text = sel.empty ? ed.state.doc.toString() : ed.state.sliceDoc(sel.from, sel.to);
-  return text.trim();
-}
-
 function mountEditor() {
   if (!host.value || view) return;
   view = new EditorView({
@@ -43,28 +31,13 @@ function mountEditor() {
     state: EditorState.create({
       doc: props.modelValue,
       extensions: [
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        EditorView.lineWrapping,
         lineNumbers(),
-        highlightActiveLine(),
-        history(),
         cmHighlight(),
         dialectComp.of(dialectExt(props.dialect)),
         themeComp.of(cmTheme(ui.settings.theme !== "light")),
-        placeholder("SELECT"),
-        keymap.of([
-          {
-            key: "Mod-Enter",
-            run: (ed) => {
-              emit("run", sqlToRun(ed));
-              return true;
-            },
-          },
-          ...defaultKeymap,
-          ...historyKeymap,
-          indentWithTab,
-        ]),
-        EditorView.updateListener.of((u) => {
-          if (u.docChanged) emit("update:modelValue", u.state.doc.toString());
-        }),
       ],
     }),
   });
@@ -100,14 +73,8 @@ watch(
     });
   },
 );
-
-defineExpose({
-  runSql(): string {
-    return view ? sqlToRun(view) : props.modelValue.trim();
-  },
-});
 </script>
 
 <template>
-  <div ref="host" class="h-full min-h-0 w-full overflow-hidden" />
+  <div ref="host" class="h-full min-h-0 w-full overflow-hidden text-[12px]" />
 </template>

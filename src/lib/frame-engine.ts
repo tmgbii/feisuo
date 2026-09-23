@@ -17,6 +17,19 @@ export interface DecodedField {
   name: string;
   raw: string;
   value: string;
+  unit?: string;
+  offset?: number;
+  size?: number;
+  spanKey?: string;
+}
+
+export interface FrameSpan {
+  key: string;
+  name: string;
+  offset: number;
+  size: number;
+  role: "head" | "length" | "field" | "checksum" | "tail";
+  tone?: number;
 }
 
 export interface ParsedFrame {
@@ -26,6 +39,7 @@ export interface ParsedFrame {
   checksumExpect?: string;
   checksumGot?: string;
   fields: DecodedField[];
+  spans?: FrameSpan[];
   note?: string;
 }
 
@@ -138,12 +152,11 @@ function decodeFloat(slice: number[], endian: FrameEndian, bytes: 4 | 8): number
   return bytes === 4 ? buf.getFloat32(0) : buf.getFloat64(0);
 }
 
-function formatNum(n: number, scale?: number, bias?: number, unit?: string): string {
+function formatNum(n: number, scale?: number, bias?: number): string {
   let v = n;
   if (scale != null) v *= scale;
   if (bias != null) v += bias;
-  const text = Number.isInteger(v) ? String(v) : String(Number(v.toFixed(6)));
-  return unit ? `${text} ${unit}` : text;
+  return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(6)));
 }
 
 function decodeField(frame: number[], field: FrameField, endian: FrameEndian, schema: FrameSchema): DecodedField {
@@ -170,25 +183,26 @@ function decodeField(frame: number[], field: FrameField, endian: FrameEndian, sc
       case "uint8":
       case "uint16":
       case "uint32":
-        value = formatNum(readUInt(slice, 0, slice.length, end), field.scale, field.bias, field.unit);
+        value = formatNum(readUInt(slice, 0, slice.length, end), field.scale, field.bias);
         break;
       case "int8":
       case "int16":
       case "int32":
-        value = formatNum(readInt(slice, 0, slice.length, end), field.scale, field.bias, field.unit);
+        value = formatNum(readInt(slice, 0, slice.length, end), field.scale, field.bias);
         break;
       case "bcd":
-        value = formatNum(Number(decodeBcd(slice)) || 0, field.scale, field.bias, field.unit);
-        if (!field.scale && !field.bias && !field.unit) value = decodeBcd(slice);
+        value = !field.scale && !field.bias
+          ? decodeBcd(slice)
+          : formatNum(Number(decodeBcd(slice)) || 0, field.scale, field.bias);
         break;
       case "ascii":
         value = slice.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : ".")).join("");
         break;
       case "float32":
-        value = formatNum(decodeFloat(slice, end, 4), field.scale, field.bias, field.unit);
+        value = formatNum(decodeFloat(slice, end, 4), field.scale, field.bias);
         break;
       case "float64":
-        value = formatNum(decodeFloat(slice, end, 8), field.scale, field.bias, field.unit);
+        value = formatNum(decodeFloat(slice, end, 8), field.scale, field.bias);
         break;
       case "bit": {
         const bit = field.bit ?? 0;
@@ -201,7 +215,39 @@ function decodeField(frame: number[], field: FrameField, endian: FrameEndian, sc
   } catch {
     value = raw;
   }
-  return { name: field.name, raw, value };
+  return { name: field.name, raw, value, unit: field.unit, offset: field.offset, size };
+}
+
+function buildSpans(schema: FrameSchema, frame: number[], fields: DecodedField[]): FrameSpan[] {
+  const spans: FrameSpan[] = [];
+  const head = hexBytes(schema.frame.head);
+  if (head.length) spans.push({ key: "head", name: "", offset: 0, size: head.length, role: "head" });
+  const lf = schema.frame.lengthField;
+  if (lf && lf.size > 0 && lf.offset >= 0 && lf.offset < frame.length) {
+    spans.push({ key: "length", name: "", offset: lf.offset, size: lf.size, role: "length" });
+  }
+  fields.forEach((field, i) => {
+    if (field.offset == null || !field.size || field.offset < 0) return;
+    const key = `field:${i}`;
+    field.spanKey = key;
+    spans.push({ key, name: field.name, offset: field.offset, size: field.size, role: "field" });
+  });
+  const cs = schema.frame.checksum;
+  if (cs && cs.size > 0) {
+    const idx = checksumIndex(frame.length, cs.offset);
+    if (idx >= 0 && idx < frame.length) {
+      spans.push({ key: "checksum", name: "", offset: idx, size: cs.size, role: "checksum" });
+    }
+  }
+  const tail = hexBytes(schema.frame.tail);
+  if (tail.length && tail.length <= frame.length) {
+    spans.push({ key: "tail", name: "", offset: frame.length - tail.length, size: tail.length, role: "tail" });
+  }
+  let tone = 0;
+  for (const span of spans) {
+    if (span.role === "field") span.tone = tone++;
+  }
+  return spans;
 }
 
 function inspectFrame(schema: FrameSchema, frame: number[]): ParsedFrame {
@@ -224,13 +270,15 @@ function inspectFrame(schema: FrameSchema, frame: number[]): ParsedFrame {
       checksumGot = "—";
     }
   }
+  const fields = schema.fields.map((f) => decodeField(frame, f, endian, schema));
   return {
     kind: "ok",
     hex: bytesToHex(frame),
     checksumOk,
     checksumExpect,
     checksumGot,
-    fields: schema.fields.map((f) => decodeField(frame, f, endian, schema)),
+    fields,
+    spans: buildSpans(schema, frame, fields),
   };
 }
 

@@ -20,6 +20,7 @@ import HttpView from "@/components/http/HttpView.vue";
 import ModbusLabView from "@/components/modbus/ModbusLabView.vue";
 import AiView from "@/components/ai/AiView.vue";
 import ToolsView from "@/components/tools/ToolsView.vue";
+import NetWatchView from "@/components/tools/NetWatchView.vue";
 import SettingsView from "@/components/settings/SettingsView.vue";
 import CommandPalette from "@/components/command/CommandPalette.vue";
 import HelpDialog from "@/components/layout/HelpDialog.vue";
@@ -139,6 +140,7 @@ onUnmounted(() => {
       <main class="min-h-0 min-w-0 flex-1 overflow-hidden bg-bg-0/40">
         <ToolsView v-if="ui.rail === 'tools'" />
         <SettingsView v-else-if="ui.rail === 'settings'" />
+        <NetWatchView v-else-if="ui.rail === 'net'" />
         <ModbusLabView v-else-if="ui.rail === 'modbus'" />
         <SshHostBook v-else-if="ui.rail === 'ssh' && !currentSession" />
         <div

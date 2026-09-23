@@ -15,6 +15,8 @@ pub struct RxFrame {
 pub struct RxBatch {
     pub session_id: String,
     pub frames: Vec<RxFrame>,
+    #[serde(default)]
+    pub dropped: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]

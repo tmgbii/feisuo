@@ -1,7 +1,7 @@
-import { METER_FIXTURE, type FrameSchema } from "@/lib/frame-schema";
+import type { FrameSchema } from "@/lib/frame-schema";
 
+/** 数组顺序即列表顺序。 */
 export const BUILTIN_SCHEMAS: FrameSchema[] = [
-  METER_FIXTURE,
   {
     schemaId: "modbus-rtu",
     name: "Modbus RTU",
@@ -55,6 +55,26 @@ export const BUILTIN_SCHEMAS: FrameSchema[] = [
     ],
   },
   {
+    schemaId: "cjt188",
+    name: "CJ/T 188",
+    builtin: true,
+    sample: "68 10 00 00 00 00 00 00 00 68 01 02 90 1F 92 16",
+    endian: "little",
+    frame: {
+      head: "68",
+      tail: "16",
+      lengthField: { offset: 11, size: 1, includes: "body" },
+      checksum: { offset: -2, size: 1, algo: "sum8" },
+    },
+    fields: [
+      { name: "仪表类型", offset: 1, size: 1, type: "uint8" },
+      { name: "表地址", offset: 2, size: 7, type: "bcd" },
+      { name: "控制码", offset: 10, size: 1, type: "uint8" },
+      { name: "长度", offset: 11, size: 1, type: "uint8" },
+      { name: "数据", offset: 12, size: "rest", type: "hex" },
+    ],
+  },
+  {
     schemaId: "iec104",
     name: "IEC 104",
     builtin: true,
@@ -88,6 +108,22 @@ export const BUILTIN_SCHEMAS: FrameSchema[] = [
       { name: "加密", offset: 21, size: 1, type: "uint8" },
       { name: "长度", offset: 22, size: 2, type: "uint16" },
       { name: "数据", offset: 24, size: "rest", type: "hex" },
+    ],
+  },
+  {
+    schemaId: "xk3190",
+    name: "耀华 XK3190",
+    builtin: true,
+    sample: "02 20 20 30 30 31 32 33 34 35 20 4B 47 20 0D 0A",
+    endian: "big",
+    frame: {
+      head: "02",
+      tail: "0D 0A",
+    },
+    fields: [
+      { name: "状态", offset: 1, size: 2, type: "ascii" },
+      { name: "重量", offset: 3, size: 7, type: "ascii" },
+      { name: "单位", offset: 10, size: 4, type: "ascii" },
     ],
   },
   {

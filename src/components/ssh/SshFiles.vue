@@ -21,12 +21,14 @@ import { toast } from "vue-sonner";
 import { t } from "@/i18n";
 import { errorMessage, invokeSsh, isTauri, pickLocalFiles, pickSavePath } from "@/lib/ipc";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { parseMode } from "@/lib/chmod";
 import type { Session, SshFileEntry } from "@/types";
 import { useSshStore } from "@/stores/ssh";
 import { useUiStore } from "@/stores/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import CodeEditor from "@/components/common/CodeEditor.vue";
+import ChmodForm from "@/components/ssh/ChmodForm.vue";
 import {
   Dialog,
   DialogContent,
@@ -417,8 +419,8 @@ async function confirmDelete() {
 
 async function applyChmod() {
   if (!chmodTarget.value) return;
-  const mode = Number.parseInt(chmodMode.value, 8);
-  if (!Number.isFinite(mode)) {
+  const mode = parseMode(chmodMode.value);
+  if (mode === null) {
     toast.error(t("common.invalidMode"));
     return;
   }
@@ -566,7 +568,7 @@ function pct(item: { transferred: number; total: number }) {
       <Button
         size="icon-xs"
         variant="ghost"
-        title="chmod"
+        :title="t('files.chmod')"
         :disabled="!selected"
         @click="selected && startChmod(selected)"
       >
@@ -663,7 +665,7 @@ function pct(item: { transferred: number; total: number }) {
             <button
               type="button"
               class="rounded p-0.5 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-              title="chmod"
+              :title="t('files.chmod')"
               @click.stop="startChmod(entry)"
             >
               <Shield class="size-3" />
@@ -780,7 +782,9 @@ function pct(item: { transferred: number; total: number }) {
       <DialogHeader>
         <DialogTitle class="truncate pr-8 font-mono text-sm">{{ editing?.name }}</DialogTitle>
       </DialogHeader>
-      <Textarea v-model="editText" class="min-h-[min(60vh,28rem)] flex-1 font-mono text-[12px]" />
+      <div class="h-[min(60vh,28rem)] min-h-0 overflow-hidden rounded-md border border-border">
+        <CodeEditor v-if="editing" v-model="editText" :filename="editing.name" />
+      </div>
       <DialogFooter>
         <Button variant="outline" @click="editing = null">{{ t("common.cancel") }}</Button>
         <Button @click="saveEdit">{{ t("common.write") }}</Button>
@@ -789,17 +793,17 @@ function pct(item: { transferred: number; total: number }) {
   </Dialog>
 
   <Dialog :open="Boolean(chmodTarget)" @update:open="(v: boolean) => { if (!v) chmodTarget = null }">
-    <DialogContent class="sm:max-w-sm">
+    <DialogContent class="sm:max-w-md">
       <DialogHeader>
-        <DialogTitle>chmod</DialogTitle>
+        <DialogTitle>{{ t("files.chmod") }}</DialogTitle>
         <DialogDescription class="font-mono break-all">
           {{ chmodTarget?.path }}
           <span v-if="chmodRecurse" class="mt-1 block text-err">{{ t("common.recurseWarn") }}</span>
         </DialogDescription>
       </DialogHeader>
-      <Input v-model="chmodMode" class="h-8 font-mono" placeholder="0755" />
-      <label class="flex items-center gap-2 text-xs text-muted-foreground">
-        <input v-model="chmodRecurse" type="checkbox" />
+      <ChmodForm v-model="chmodMode" :is-dir="chmodTarget?.isDir" />
+      <label v-if="chmodTarget?.isDir" class="flex items-center gap-2 text-xs text-muted-foreground">
+        <input v-model="chmodRecurse" type="checkbox" class="accent-primary" />
         {{ t("common.recursive") }}
       </label>
       <DialogFooter>

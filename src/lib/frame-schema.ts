@@ -65,8 +65,6 @@ export interface FrameSchema {
   fields: FrameField[];
 }
 
-export const METER_FIXTURE_HEX = "68 10 07 12 34 11 64 00 00 00 3A 16";
-
 export const FIELD_TYPES: FrameFieldType[] = [
   "uint8",
   "uint16",
@@ -96,25 +94,6 @@ export function blankField(): FrameField {
   return { name: "", offset: 0, size: 1, type: "hex" };
 }
 
-export const METER_FIXTURE: FrameSchema = {
-  schemaId: "fixture-68-16",
-  name: "夹具 68…16",
-  builtin: true,
-  sample: METER_FIXTURE_HEX,
-  endian: "big",
-  frame: {
-    head: "68 10",
-    tail: "16",
-    lengthField: { offset: 2, size: 1, includes: "body" },
-    checksum: { offset: -2, size: 1, algo: "sum8" },
-  },
-  fields: [
-    { name: "表地址", offset: 3, size: 2, type: "bcd" },
-    { name: "功能码", offset: 5, size: 1, type: "uint8" },
-    { name: "累计电量", offset: 6, size: 4, type: "uint32", endian: "little", scale: 0.1, unit: "kWh" },
-  ],
-};
-
 export function blankSchema(): FrameSchema {
   return {
     schemaId: crypto.randomUUID(),
@@ -136,14 +115,18 @@ const SCHEMA_LABELS: Record<string, string> = {
   单元: "lab.unit",
   数据: "tools.data",
   表地址: "tools.meterAddr",
+  仪表类型: "tools.meterType",
   累计电量: "tools.energy",
   控制码: "tools.ctrlCode",
   控制域: "tools.ctrlField",
   命令: "tools.cmd",
   应答: "tools.response",
   加密: "tools.encrypt",
-  "夹具 68…16": "tools.fixture6816",
   "通用 AA55": "tools.genericAa55",
+  "耀华 XK3190": "tools.xk3190",
+  状态: "tools.status",
+  重量: "tools.weight",
+  单位: "tools.unit",
   未命名: "pack.unnamed",
 };
 

@@ -1,5 +1,5 @@
 import { appendCrc16Modbus, crc16Modbus, lrc } from "@/lib/checksum";
-import { bytesToHex, bytesToText, hexToBytes } from "@/lib/hex";
+import { bytesToHex, bytesToText, formatHexDump, hexToBytes } from "@/lib/hex";
 import { t } from "@/i18n";
 
 export type ModbusMode = "RTU" | "ASCII" | "TCP";
@@ -55,6 +55,9 @@ export interface ModbusParseResult {
   address?: number;
   quantity?: number;
   payload?: { kind: "registers" | "coils"; bytes: number[] };
+  payloadAt?: number;
+  /** 色块和字段共用的字节，空格分隔。ASCII 是 ADU+LRC，不是冒号原文。 */
+  wire: string;
   fields: ModbusParseField[];
   errors: string[];
 }
@@ -130,6 +133,7 @@ function parsePdu(pdu: number[]): {
   address?: number;
   quantity?: number;
   payload?: { kind: "registers" | "coils"; bytes: number[] };
+  dataAt?: number;
   fields: ModbusParseField[];
   errors: string[];
 } {
@@ -175,6 +179,7 @@ function parsePdu(pdu: number[]): {
       role: "response",
       func,
       payload: { kind: func === 0x01 || func === 0x02 ? "coils" : "registers", bytes: data },
+      dataAt: 2,
       fields,
       errors,
     };
@@ -223,6 +228,7 @@ function parsePdu(pdu: number[]): {
       address,
       quantity,
       payload: { kind: func === 0x0f ? "coils" : "registers", bytes: data },
+      dataAt: 6,
       fields,
       errors,
     };
@@ -231,6 +237,34 @@ function parsePdu(pdu: number[]): {
   fields.push({ label: "PDU", value: bytesToHex(pdu) });
   errors.push(t("tools.unknownFc"));
   return { role: "unknown", func, fields, errors };
+}
+
+/** 冒号开头的 Modbus ASCII 保持原样；其余整理成空格分隔的十六进制。 */
+export function normalizeModbusInput(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith(":")) {
+    const body = trimmed.slice(1).replace(/\s+/g, "").replace(/\r?\n$/, "");
+    if (!/^[0-9A-Fa-f]+$/.test(body) || body.length < 2) return null;
+    return `:${body.toUpperCase()}`;
+  }
+  return formatHexDump(trimmed);
+}
+
+/** 半截 TCP（长度字段还没收齐）先不解析，避免被当成 RTU。 */
+export function modbusFrameReady(input: string): boolean {
+  const text = input.trim();
+  if (text.startsWith(":")) {
+    const n = text.slice(1).length / 2;
+    return Number.isInteger(n) && n >= 3;
+  }
+  const bytes = hexToBytes(text);
+  if (bytes.length < 4 || bytes.some((b) => Number.isNaN(b))) return false;
+  if (bytes.length >= 6 && bytes[2] === 0 && bytes[3] === 0) {
+    const len = be16(bytes, 4);
+    if (len >= 2 && bytes.length < 6 + len) return false;
+  }
+  return true;
 }
 
 function detectMode(bytes: number[], raw: string): ModbusMode {
@@ -270,12 +304,14 @@ export function parseModbus(input: string, modeHint: "auto" | ModbusMode = "auto
   const errors: string[] = [];
   let slave = 0;
   let pdu: number[] = [];
+  let wire = "";
   const extra: ModbusParseField[] = [];
 
   if (mode === "ASCII") {
     const parsed = parseAscii(raw, bytes);
     slave = parsed.adu[0] ?? 0;
     pdu = parsed.adu.slice(1);
+    wire = bytesToHex([...parsed.adu, parsed.lrcRecv]);
     extra.push({
       label: "LRC",
       value: parsed.lrcOk
@@ -293,6 +329,7 @@ export function parseModbus(input: string, modeHint: "auto" | ModbusMode = "auto
     const length = be16(bytes, 4);
     slave = bytes[6] ?? 0;
     pdu = bytes.slice(7);
+    wire = bytesToHex(bytes);
     extra.push({ label: t("tools.tid"), value: String(transaction) });
     extra.push({ label: t("tools.protoId"), value: String(protocol) });
     extra.push({ label: t("tools.length"), value: String(length) });
@@ -305,6 +342,7 @@ export function parseModbus(input: string, modeHint: "auto" | ModbusMode = "auto
     const crcCalc = crc16Modbus(body);
     slave = body[0] ?? 0;
     pdu = body.slice(1);
+    wire = bytesToHex(bytes);
     extra.push({
       label: "CRC16",
       value: crcRecv === crcCalc
@@ -337,6 +375,8 @@ export function parseModbus(input: string, modeHint: "auto" | ModbusMode = "auto
     address: parsed.address,
     quantity: parsed.quantity,
     payload: parsed.payload,
+    payloadAt: parsed.dataAt == null ? undefined : (mode === "TCP" ? 7 : 1) + parsed.dataAt,
+    wire,
     fields,
     errors: [...parsed.errors, ...errors],
   };

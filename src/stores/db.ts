@@ -3,22 +3,79 @@ import { reactive } from "vue";
 import { toast } from "vue-sonner";
 import { t } from "@/i18n";
 import { errorMessage, invokeSsh, isTauri } from "@/lib/ipc";
-import { normalizeDbConfig } from "@/lib/protocol";
+import { dbDefaultPort, normalizeDbConfig } from "@/lib/protocol";
 import { useSessionsStore } from "@/stores/sessions";
 import type { DbConfig } from "@/types";
 
+export interface DbColumn {
+  name: string;
+  type: string;
+  comment: string;
+  pk: boolean;
+}
+
 export interface DbQueryResult {
-  columns: string[];
+  columns: DbColumn[];
   rows: (string | null)[][];
   affected: number;
   elapsedMs: number;
   truncated: boolean;
   kind: "query" | "exec";
+  offset: number;
+  hasMore: boolean;
+  paged: boolean;
+}
+
+export const DB_PAGE_SIZES = [100, 200, 500, 1000];
+
+function asColumns(raw: unknown): DbColumn[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    if (typeof item === "string") {
+      return { name: item, type: "", comment: "", pk: false };
+    }
+    const col = item as { name?: string; type?: string; comment?: string; pk?: boolean };
+    return {
+      name: col.name ?? "",
+      type: col.type ?? "",
+      comment: col.comment ?? "",
+      pk: Boolean(col.pk),
+    };
+  });
 }
 
 export interface DbTable {
   schema: string;
   name: string;
+  comment: string;
+}
+
+export interface DbInspectCol {
+  name: string;
+  type: string;
+  nullable: boolean;
+  default: string;
+  comment: string;
+  pk: boolean;
+}
+
+export interface DbInspectRow {
+  name: string;
+  detail: string;
+}
+
+export interface DbTableInspect {
+  schema: string;
+  name: string;
+  comment: string;
+  estimate: string;
+  size: string;
+  columns: DbInspectCol[];
+  indexes: DbInspectRow[];
+  foreignKeys: DbInspectRow[];
+  checks: DbInspectRow[];
+  triggers: DbInspectRow[];
+  ddl: string;
 }
 
 export interface DbScriptLine {
@@ -42,9 +99,18 @@ interface DbViewState {
   scriptLog: DbScriptLine[];
   scriptTotal: number;
   scripting: boolean;
+  inspect: DbTableInspect | null;
+  inspecting: boolean;
+  exporting: boolean;
+  page: number;
+  pageSize: number;
+  total: number | null;
+  querySql: string;
+  countGen: number;
 }
 
 const SCRIPT_LOG_CAP = 300;
+let pageSizePref = 200;
 
 function emptyView(): DbViewState {
   return {
@@ -57,7 +123,23 @@ function emptyView(): DbViewState {
     scriptLog: [],
     scriptTotal: 0,
     scripting: false,
+    inspect: null,
+    inspecting: false,
+    exporting: false,
+    page: 1,
+    pageSize: pageSizePref,
+    total: null,
+    querySql: "",
+    countGen: 0,
   };
+}
+
+function clearGrid(v: DbViewState) {
+  v.result = null;
+  v.page = 1;
+  v.total = null;
+  v.querySql = "";
+  v.countGen += 1;
 }
 
 export const useDbStore = defineStore("db", () => {
@@ -76,7 +158,7 @@ export const useDbStore = defineStore("db", () => {
 
   function resetResult(id: string) {
     const v = viewOf(id);
-    v.result = null;
+    clearGrid(v);
     v.error = "";
     v.running = false;
     v.tables = [];
@@ -85,6 +167,9 @@ export const useDbStore = defineStore("db", () => {
     v.scriptLog = [];
     v.scriptTotal = 0;
     v.scripting = false;
+    v.inspect = null;
+    v.inspecting = false;
+    v.exporting = false;
   }
 
   async function connect(id: string) {
@@ -111,7 +196,7 @@ export const useDbStore = defineStore("db", () => {
           sessionId: id,
           engine: cfg.engine,
           host: cfg.host.trim(),
-          port: Number(cfg.port) || (cfg.engine === "mysql" ? 3306 : 5432),
+          port: Number(cfg.port) || dbDefaultPort(cfg.engine),
           database: cfg.database.trim(),
           user: cfg.user.trim(),
           password: cfg.password,
@@ -204,7 +289,7 @@ export const useDbStore = defineStore("db", () => {
       await invokeSsh("db_use", { sessionId: id, database: next });
       if (useSessionsStore().sessions.find((x) => x.id === id)?.status !== "connected") return;
       useSessionsStore().updateConfig(id, { database: next });
-      v.result = null;
+      clearGrid(v);
       v.scriptLog = [];
       v.scriptTotal = 0;
       await Promise.all([listTables(id), listDatabases(id)]);
@@ -215,19 +300,41 @@ export const useDbStore = defineStore("db", () => {
     }
   }
 
-  async function query(id: string, sql: string) {
+  function normalizeResult(result: DbQueryResult): DbQueryResult {
+    return {
+      ...result,
+      columns: asColumns(result.columns),
+      offset: result.offset ?? 0,
+      hasMore: Boolean(result.hasMore),
+      paged: Boolean(result.paged),
+    };
+  }
+
+  async function loadTotal(id: string, sql: string, gen: number) {
+    const v = viewOf(id);
+    try {
+      const n = await invokeSsh<number>("db_count", { sessionId: id, sql });
+      if (v.countGen === gen && v.querySql === sql) v.total = n;
+    } catch {
+      /* next page still works */
+    }
+  }
+
+  async function query(id: string, sql: string, page = 1) {
     const v = viewOf(id);
     const session = useSessionsStore().sessions.find((x) => x.id === id);
     const cfg = dbConfig(id);
+    const text = sql.trim();
+    const nextPage = Math.max(1, page);
     v.error = "";
-    v.result = null;
-    v.scriptLog = [];
-    v.scriptTotal = 0;
+    if (nextPage === 1) {
+      v.scriptLog = [];
+      v.scriptTotal = 0;
+    }
     if (!session || session.status !== "connected") {
       v.error = t("err.notConnected");
       return;
     }
-    const text = sql.trim();
     if (!text) {
       v.error = t("err.sql_empty");
       return;
@@ -236,25 +343,71 @@ export const useDbStore = defineStore("db", () => {
       v.error = t("err.needDesktop");
       return;
     }
+    if (v.running) return;
     v.running = true;
+    if (nextPage === 1) {
+      v.countGen += 1;
+      v.querySql = text;
+      v.total = null;
+      v.page = 1;
+      v.result = null;
+    }
+    const offset = Math.min((nextPage - 1) * v.pageSize, 0xffffffff);
     try {
-      const result = await invokeSsh<DbQueryResult>("db_query", {
-        req: {
-          sessionId: id,
-          sql: text,
-          selectOnly: Boolean(cfg?.selectOnly),
-        },
-      });
+      const result = normalizeResult(
+        await invokeSsh<DbQueryResult>("db_query", {
+          req: {
+            sessionId: id,
+            sql: text,
+            selectOnly: Boolean(cfg?.selectOnly),
+            limit: v.pageSize,
+            offset,
+          },
+        }),
+      );
       if (useSessionsStore().sessions.find((x) => x.id === id)?.status !== "connected") {
         resetResult(id);
         return;
       }
+      if (nextPage > 1 && result.paged && result.rows.length === 0) return;
       v.result = result;
+      v.page = nextPage;
+      if (!result.paged) v.total = result.rows.length;
+      else if (nextPage === 1) void loadTotal(id, text, v.countGen);
     } catch (err) {
+      if (nextPage === 1) v.result = null;
       v.error = errorMessage(err);
     } finally {
       v.running = false;
     }
+  }
+
+  function setPage(id: string, page: number) {
+    const v = viewOf(id);
+    if (v.running || v.scripting || !v.result || v.result.kind !== "query") return;
+    const next = Math.max(1, Math.floor(page));
+    if (next === v.page) return;
+    if (v.result.paged) {
+      if (!v.querySql) return;
+      void query(id, v.querySql, next);
+      return;
+    }
+    const max = Math.max(1, Math.ceil(v.result.rows.length / v.pageSize));
+    v.page = Math.min(next, max);
+  }
+
+  function setPageSize(id: string, size: number) {
+    if (!DB_PAGE_SIZES.includes(size)) return;
+    const v = viewOf(id);
+    if (v.running || v.scripting || v.pageSize === size) return;
+    pageSizePref = size;
+    v.pageSize = size;
+    if (!v.result || v.result.kind !== "query") return;
+    if (v.result.paged && v.querySql) {
+      void query(id, v.querySql, 1);
+      return;
+    }
+    v.page = 1;
   }
 
   async function runScript(id: string, path: string) {
@@ -262,7 +415,7 @@ export const useDbStore = defineStore("db", () => {
     const session = useSessionsStore().sessions.find((x) => x.id === id);
     const cfg = dbConfig(id);
     v.error = "";
-    v.result = null;
+    clearGrid(v);
     v.scriptLog = [];
     v.scriptTotal = 0;
     if (!session || session.status !== "connected") {
@@ -285,6 +438,62 @@ export const useDbStore = defineStore("db", () => {
     } catch (err) {
       v.error = errorMessage(err);
       v.scripting = false;
+    }
+  }
+
+  async function exportSql(id: string, schema: string, name: string, path: string) {
+    const v = viewOf(id);
+    const session = useSessionsStore().sessions.find((x) => x.id === id);
+    if (!session || session.status !== "connected") {
+      toast.error(t("err.notConnected"));
+      return;
+    }
+    if (!isTauri()) {
+      toast.error(t("err.needDesktop"));
+      return;
+    }
+    if (v.exporting || v.scripting) return;
+    v.exporting = true;
+    v.error = "";
+    try {
+      await invokeSsh("db_export", {
+        req: { sessionId: id, path, schema, name },
+      });
+    } catch (err) {
+      v.error = errorMessage(err);
+    } finally {
+      v.exporting = false;
+    }
+  }
+
+  async function inspect(id: string, schema: string, name: string): Promise<boolean> {
+    const v = viewOf(id);
+    const session = useSessionsStore().sessions.find((x) => x.id === id);
+    if (!session || session.status !== "connected") {
+      v.inspect = null;
+      return false;
+    }
+    if (!isTauri()) {
+      toast.error(t("err.needDesktop"));
+      return false;
+    }
+    v.inspecting = true;
+    try {
+      const info = await invokeSsh<DbTableInspect>("db_inspect", {
+        req: { sessionId: id, schema, name },
+      });
+      if (useSessionsStore().sessions.find((x) => x.id === id)?.status !== "connected") {
+        v.inspect = null;
+        return false;
+      }
+      v.inspect = info;
+      return true;
+    } catch (err) {
+      v.inspect = null;
+      toast.error(errorMessage(err));
+      return false;
+    } finally {
+      v.inspecting = false;
     }
   }
 
@@ -383,6 +592,10 @@ export const useDbStore = defineStore("db", () => {
     listDatabases,
     useDatabase,
     query,
+    setPage,
+    setPageSize,
+    inspect,
+    exportSql,
     runScript,
     stopScript,
     dropSession,

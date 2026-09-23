@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 import { formatRadix, parseRadix, toggleRadix, type NumericRadix } from "@/lib/radix";
@@ -67,6 +67,10 @@ function onBlur() {
   focused.value = false;
 }
 
+onBeforeUnmount(() => {
+  if (focused.value) commit(draft.value);
+});
+
 function onToggle() {
   const n = parseRadix(focused.value ? draft.value : shown.value, current.value) ?? numeric.value;
   current.value = toggleRadix(current.value);
@@ -87,7 +91,7 @@ function onToggle() {
       :class="hideToggle ? 'h-7 pr-2 font-mono text-xs' : 'h-7 pr-8 font-mono text-xs'"
       @focus="onFocus"
       @blur="onBlur"
-      @update:model-value="draft = String($event)"
+      @update:model-value="draft = String($event); commit(draft)"
     />
     <RadixToggle
       v-if="!hideToggle"

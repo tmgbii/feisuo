@@ -46,7 +46,11 @@ export const useUiStore = defineStore("ui", () => {
   });
 
   const isChromeView = computed(
-    () => rail.value === "tools" || rail.value === "settings" || rail.value === "modbus",
+    () =>
+      rail.value === "tools" ||
+      rail.value === "settings" ||
+      rail.value === "modbus" ||
+      rail.value === "net",
   );
 
   function setRail(next: RailId) {

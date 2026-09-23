@@ -7,7 +7,6 @@ import HistoryPanel from "@/components/tools/HistoryPanel.vue";
 import JsonStudio from "@/components/tools/JsonStudio.vue";
 import ModbusPanel from "@/components/tools/ModbusPanel.vue";
 import MoreTools from "@/components/tools/MoreTools.vue";
-import NetWatch from "@/components/tools/NetWatch.vue";
 import PageHelp from "@/components/common/PageHelp.vue";
 import { toolTab } from "@/lib/tool-bridge";
 import { cn } from "@/lib/utils";
@@ -16,7 +15,6 @@ const nav = computed(() => [
   { id: "modbus" as const, label: t("tools.modbus") },
   { id: "parse" as const, label: t("tools.parse") },
   { id: "json" as const, label: t("tools.json") },
-  { id: "net" as const, label: t("tools.net") },
   { id: "history" as const, label: t("tools.history") },
   { id: "ascii" as const, label: t("tools.ascii") },
   { id: "more" as const, label: t("tools.more") },
@@ -51,14 +49,13 @@ watch(current, (id) => {
         <h1 class="text-base font-medium">{{ nav.find((n) => n.id === current)?.label }}</h1>
         <PageHelp page="tools" />
       </div>
-      <div :class="current === 'json' || current === 'parse' || current === 'net' ? 'min-h-0 flex-1 overflow-hidden' : 'min-h-0 flex-1 overflow-auto'">
-        <JsonStudio v-if="current === 'json'" />
-        <FrameParse v-else-if="current === 'parse'" />
-        <ModbusPanel v-else-if="current === 'modbus'" />
-        <NetWatch v-else-if="current === 'net'" />
-        <HistoryPanel v-else-if="current === 'history'" />
-        <AsciiTable v-else-if="current === 'ascii'" />
-        <MoreTools v-else />
+      <div :class="current === 'json' || current === 'parse' ? 'min-h-0 flex-1 overflow-hidden' : 'min-h-0 flex-1 overflow-auto'">
+        <JsonStudio v-show="current === 'json'" />
+        <FrameParse v-show="current === 'parse'" />
+        <ModbusPanel v-show="current === 'modbus'" />
+        <HistoryPanel v-show="current === 'history'" />
+        <AsciiTable v-show="current === 'ascii'" />
+        <MoreTools v-show="current === 'more'" />
       </div>
     </div>
   </div>

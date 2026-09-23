@@ -18,8 +18,9 @@ export type RailId =
   | "ssh"
   | "ftp"
   | "db"
-  | "modbus"
   | "ai"
+  | "net"
+  | "modbus"
   | "tools"
   | "settings";
 
@@ -144,7 +145,7 @@ export interface FtpConfig {
   password: string;
 }
 
-export type DbEngine = "postgres" | "mysql" | "sqlite";
+export type DbEngine = "postgres" | "mysql" | "sqlite" | "sqlserver";
 
 export interface DbConfig {
   kind: "db";

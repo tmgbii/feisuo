@@ -21,7 +21,7 @@ const panelTab = computed({
 
 <template>
   <aside class="flex w-96 shrink-0 flex-col border-l border-border bg-bg-1/45">
-    <Tabs v-model="panelTab" class="flex h-full flex-col">
+    <Tabs v-model="panelTab" :unmount-on-hide="false" class="flex h-full flex-col">
       <div class="border-b border-border px-1.5 py-1">
         <TabsList class="grid h-8 w-full grid-cols-6 text-[10px]">
           <TabsTrigger value="modbus" class="px-0 text-[10px]">Modbus</TabsTrigger>

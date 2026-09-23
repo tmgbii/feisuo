@@ -67,7 +67,13 @@ pub fn start_session(
         );
     }
 
-    batch::spawn_batcher(app.clone(), session_id.clone(), batch_rx, cancel.clone());
+    batch::spawn_batcher(
+        app.clone(),
+        session_id.clone(),
+        batch_rx,
+        cancel.clone(),
+        state.ui_alive_ms.clone(),
+    );
 
     match config {
         ConnectConfig::Serial { .. } => {

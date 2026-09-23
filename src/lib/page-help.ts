@@ -13,6 +13,7 @@ export type PageHelpId =
   | "db"
   | "ai"
   | "sim"
+  | "net"
   | "tools"
   | "settings"
   | "dashboard";
@@ -166,12 +167,12 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
   http: {
     title: "HTTP",
     lead: [
-      "方法 + 完整 URL。Params 拼查询串；Headers / Body / Auth 分栏。Ctrl+Enter 发送。请求从本机发出，无浏览器 CORS。",
+      "方法 + 完整 URL。参数拼查询串；请求头 / 正文 / 认证分栏。Ctrl+Enter 发送。请求从本机发出，无浏览器 CORS。",
     ],
     sections: [
       {
         title: "GET",
-        lines: ["无 Body。查询既可写在 URL 里，也可写在 Params。"],
+        lines: ["无正文。查询写在 URL 或参数里。"],
         examples: [
           {
             caption: "探活：",
@@ -181,7 +182,7 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
       },
       {
         title: "POST JSON",
-        lines: ["Headers 里 Content-Type 选 application/json，Body 填对象。"],
+        lines: ["Content-Type 用 application/json。正文为 JSON。"],
         examples: [
           {
             caption: "登录：",
@@ -267,7 +268,10 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
     sections: [
       {
         title: "连接",
-        lines: ["SQLite 选文件，无端口用户。PG / MySQL 切库：连上后库名变下拉。"],
+        lines: [
+          "SQLite 选文件，无端口用户。PG / MySQL / SQL Server 切库：连上后库名变下拉。",
+          "macOS 15+ 连局域网库需要「本地网络」权限，与 MQTT 同一开关。",
+        ],
         examples: [
           {
             caption: "PostgreSQL：",
@@ -277,14 +281,18 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
             caption: "MySQL：",
             sample: "MySQL  127.0.0.1  3306  库 mydb  用户 root",
           },
+          {
+            caption: "SQL Server：",
+            sample: "SQL Server  127.0.0.1  1433  库 mydb  用户 sa",
+          },
         ],
       },
       {
         title: "SQL",
-        lines: ["表右键生成 SELECT / 索引 / DDL 等到编辑器。脚本选 .sql 文件由后端按句跑。"],
+        lines: ["双击表打开一页数据。右键：打开 / 结构 / 导出 SQL。表列「导出库」出整库脚本。"],
         examples: [
           {
-            sample: "SELECT * FROM t LIMIT 100",
+            sample: "SELECT * FROM t",
           },
         ],
       },
@@ -344,9 +352,24 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
       },
     ],
   },
+  net: {
+    title: "看网",
+    lead: ["上栏 Tab，下栏动作记录。不接管会话连接。"],
+    sections: [
+      {
+        title: "探测",
+        lines: ["Ping 默认 4 次。扫描默认常见口，不是 1–1024。发现扫当前 /24。"],
+        examples: [
+          {
+            sample: "Ping  127.0.0.1\n端口  127.0.0.1  80\n占用  80",
+          },
+        ],
+      },
+    ],
+  },
   tools: {
     title: "工具",
-    lead: ["组帧、解析、校验、JSON、看网。不接管会话连接；有活动串口/TCP/UDP 会话时可以把生成帧发过去。"],
+    lead: ["组帧、解析、校验、JSON。不接管会话连接；有活动串口/TCP/UDP 会话时可以把生成帧发过去。"],
     sections: [
       {
         title: "Modbus 指令",
@@ -362,15 +385,6 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
         title: "协议解析",
         lines: ["粘 HEX，选 schema。内置电表样例可先跑通。自定义 schema 可导入。"],
       },
-      {
-        title: "看网",
-        lines: ["上栏 Tab，下栏动作记录。Ping 默认 4 次。扫描默认常见口，不是 1–1024。发现扫当前 /24。"],
-        examples: [
-          {
-            sample: "Ping  127.0.0.1\n端口  127.0.0.1  80\n占用  80",
-          },
-        ],
-      },
     ],
   },
   settings: {
@@ -385,7 +399,7 @@ export const PAGE_HELP: Record<PageHelpId, PageHelpDoc> = {
   },
   dashboard: {
     title: "飞梭",
-    lead: ["无会话时的主页。侧栏协议建会话；仿真、工具不建会话。"],
+    lead: ["无会话时的主页。侧栏协议建会话；看网、仿真、工具不建会话。"],
     sections: [
       {
         title: "仿真",
@@ -533,12 +547,12 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
   http: {
     title: "HTTP",
     lead: [
-      "Method + full URL. Params append the query; Headers / Body / Auth in tabs. Ctrl+Enter sends. Requests leave this host — no browser CORS.",
+      "Method + full URL. Params append the query; headers, body, and auth are tabs. Ctrl+Enter sends. Requests leave this host — no browser CORS.",
     ],
     sections: [
       {
         title: "GET",
-        lines: ["No Body. Query may sit on the URL or in Params."],
+        lines: ["No body. Query sits on the URL or in Params."],
         examples: [
           {
             caption: "Health:",
@@ -548,7 +562,7 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
       },
       {
         title: "POST JSON",
-        lines: ["Set Content-Type to application/json in Headers; Body is the object."],
+        lines: ["Content-Type application/json. Body is the JSON object."],
         examples: [
           {
             caption: "Login:",
@@ -636,7 +650,10 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
     sections: [
       {
         title: "Connect",
-        lines: ["SQLite: file, no port or user. PG / MySQL: after connect, database name becomes a dropdown."],
+        lines: [
+          "SQLite: file, no port or user. PG / MySQL / SQL Server: after connect, database name becomes a dropdown.",
+          "macOS 15+ needs Local Network permission for LAN databases, same toggle as MQTT.",
+        ],
         examples: [
           {
             caption: "PostgreSQL:",
@@ -646,14 +663,18 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
             caption: "MySQL:",
             sample: "MySQL  127.0.0.1  3306  db mydb  user root",
           },
+          {
+            caption: "SQL Server:",
+            sample: "SQL Server  127.0.0.1  1433  db mydb  user sa",
+          },
         ],
       },
       {
         title: "SQL",
-        lines: ["Table context menu fills SELECT / indexes / DDL into the editor. Script picks a .sql file; backend runs statement by statement."],
+        lines: ["Double-click opens one page of rows. Right-click: Open / Structure / Export SQL. Sidebar Export DB writes the whole catalog."],
         examples: [
           {
-            sample: "SELECT * FROM t LIMIT 100",
+            sample: "SELECT * FROM t",
           },
         ],
       },
@@ -713,10 +734,25 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
       },
     ],
   },
+  net: {
+    title: "Net watch",
+    lead: ["Tabs on top, action log below. Does not own a session."],
+    sections: [
+      {
+        title: "Probe",
+        lines: ["Ping defaults to 4. Scan uses common ports, not 1–1024. Discover sweeps the current /24."],
+        examples: [
+          {
+            sample: "Ping  127.0.0.1\nPort  127.0.0.1  80\nOwner  80",
+          },
+        ],
+      },
+    ],
+  },
   tools: {
     title: "Tools",
     lead: [
-      "Frame, parse, checksum, JSON, net watch. Does not own a session. An active serial/TCP/UDP session can take a generated frame.",
+      "Frame, parse, checksum, JSON. Does not own a session. An active serial/TCP/UDP session can take a generated frame.",
     ],
     sections: [
       {
@@ -732,15 +768,6 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
       {
         title: "Frame parse",
         lines: ["Paste HEX, pick a schema. Built-in meter sample can be run first. Custom schema can be imported."],
-      },
-      {
-        title: "Net watch",
-        lines: ["Tabs on top, action log below. Ping defaults to 4. Scan uses common ports, not 1–1024. Discover sweeps the current /24."],
-        examples: [
-          {
-            sample: "Ping  127.0.0.1\nPort  127.0.0.1  80\nOwner  80",
-          },
-        ],
       },
     ],
   },
@@ -758,7 +785,7 @@ export const PAGE_HELP_EN: Record<PageHelpId, PageHelpDoc> = {
   },
   dashboard: {
     title: "飞梭",
-    lead: ["Home when no session. Sidebar protocols create a session; Lab and Tools do not."],
+    lead: ["Home when no session. Sidebar protocols create a session; Watch, Lab and Tools do not."],
     sections: [
       {
         title: "Lab",

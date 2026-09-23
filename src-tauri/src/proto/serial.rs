@@ -11,7 +11,7 @@ use tokio::time::{Instant, sleep_until};
 use tokio_serial::{DataBits, FlowControl, Parity, SerialPortBuilderExt, StopBits};
 use tokio_util::sync::CancellationToken;
 
-const RX_IDLE: Duration = Duration::from_millis(40);
+const RX_IDLE: Duration = Duration::from_millis(10);
 
 pub fn list_ports() -> Result<Vec<SerialPortInfo>, String> {
     let ports = available_ports().map_err(|e| e.to_string())?;

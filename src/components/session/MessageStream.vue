@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUpdated, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { Inbox } from "@lucide/vue";
 import { t } from "@/i18n";
 import { useSessionsStore } from "@/stores/sessions";
@@ -34,10 +34,6 @@ watch(
     void scrollIfNeeded();
   },
 );
-
-onUpdated(() => {
-  void scrollIfNeeded();
-});
 </script>
 
 <template>

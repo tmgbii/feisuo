@@ -6,7 +6,7 @@ import { minifyJson, prettyJson } from "@/lib/convert";
 import { insertToComposer } from "@/lib/composer-insert";
 import { jsonSeed } from "@/lib/tool-bridge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import CodeEditor from "@/components/common/CodeEditor.vue";
 
 const input = ref("");
 const output = ref("");
@@ -86,15 +86,15 @@ function insert() {
       <Button size="sm" variant="outline" :disabled="!hasResult" @click="copyOut">{{ t("common.copy") }}</Button>
       <Button size="sm" variant="outline" :disabled="!hasResult" @click="insert">{{ t("common.insert") }}</Button>
     </div>
-    <div class="min-h-0 flex-1">
-      <Textarea
-        v-model="input"
-        class="h-full min-h-0 resize-none font-mono text-[13px] leading-5 [field-sizing:fixed]"
-        placeholder="JSON"
-      />
+    <div class="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-bg-1/80">
+      <CodeEditor v-model="input" language="json" placeholder="JSON" lint />
     </div>
-    <pre
-      class="selectable min-h-0 flex-1 overflow-auto rounded-md border border-border bg-bg-1/80 p-3 font-mono text-[13px] leading-5 whitespace-pre-wrap"
-    >{{ output }}</pre>
+    <div class="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-bg-1/80">
+      <pre
+        v-if="jsonOkOnly"
+        class="selectable h-full overflow-auto p-3 font-mono text-[13px] leading-5 whitespace-pre-wrap"
+      >{{ output }}</pre>
+      <CodeEditor v-else :model-value="output" language="json" readonly />
+    </div>
   </div>
 </template>

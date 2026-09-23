@@ -1,5 +1,3 @@
-> 关键词 / Keywords：串口调试 serial-port · 网络调试 network-tools · Modbus · MQTT · SSH · 协议解析 protocol-analyzer · 跨平台 cross-platform · Tauri · Rust
-
 # 飞梭 (Feisuo)
 
 现代通信调试工具箱 (Feisuo) — 本地离线的串口 / TCP / UDP / WebSocket / MQTT / HTTP 调试工具。

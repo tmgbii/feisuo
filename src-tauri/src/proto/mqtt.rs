@@ -5,6 +5,7 @@ use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS, TlsConfiguration, 
 use std::time::Duration;
 use tauri::AppHandle;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 pub fn spawn(
@@ -74,6 +75,7 @@ async fn run(
     let (client, mut eventloop) = AsyncClient::new(options, 256);
     let default_topic = publish_topic.unwrap_or_else(|| "test".into());
     let default_qos = qos_from(publish_qos.unwrap_or(0));
+    let poll_to = Duration::from_secs(keep_alive.max(10).saturating_add(15));
     let mut connected = false;
 
     loop {
@@ -105,13 +107,14 @@ async fn run(
                     _ => {}
                 }
             }
-            event = eventloop.poll() => {
+            event = timeout(poll_to, eventloop.poll()) => {
                 match event {
-                    Ok(Event::Incoming(Incoming::ConnAck(_))) => {
+                    Err(_) => return Err("timeout".into()),
+                    Ok(Ok(Event::Incoming(Incoming::ConnAck(_)))) => {
                         connected = true;
                         emit_status(&app, session_id, "connected", None);
                     }
-                    Ok(Event::Incoming(Incoming::Publish(p))) => {
+                    Ok(Ok(Event::Incoming(Incoming::Publish(p)))) => {
                         let _ = batch_tx.try_send(RxFrame {
                             timestamp: now_ms(),
                             data: p.payload.to_vec(),
@@ -120,10 +123,10 @@ async fn run(
                             topic: Some(p.topic),
                         });
                     }
-                    Ok(Event::Incoming(Incoming::Disconnect)) => {
+                    Ok(Ok(Event::Incoming(Incoming::Disconnect))) => {
                         return Err("broker_gone".into());
                     }
-                    Err(err) => {
+                    Ok(Err(err)) => {
                         if connected {
                             return Err(crate::proto::map_io(&err));
                         }

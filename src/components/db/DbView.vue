@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "@lucide/vue";
 import type { DbConfig, Session } from "@/types";
 import { t } from "@/i18n";
 import {
@@ -10,17 +11,14 @@ import {
   pickSavePath,
   writeLocalFile,
 } from "@/lib/ipc";
-import {
-  generateTableSql,
-  tableSqlMenu,
-  tableLabel,
-  tableSqlAvailable,
-  type TableSqlId,
-} from "@/lib/table-sql";
+import { generateTableSql, tableLabel } from "@/lib/table-sql";
 import { useSessionsStore } from "@/stores/sessions";
-import { useDbStore } from "@/stores/db";
+import { DB_PAGE_SIZES, useDbStore } from "@/stores/db";
 import DbBar from "@/components/db/DbBar.vue";
 import SqlEditor from "@/components/db/SqlEditor.vue";
+import TableInspect from "@/components/db/TableInspect.vue";
+import CellViewer from "@/components/db/CellViewer.vue";
+import AppSelect from "@/components/common/AppSelect.vue";
 import { Button } from "@/components/ui/button";
 
 const EDITOR_MAX = 2 * 1024 * 1024;
@@ -34,7 +32,9 @@ const editor = ref<{ runSql: () => string } | null>(null);
 const cfg = computed(() => props.session.config as DbConfig);
 const view = computed(() => db.viewOf(props.session.id));
 const connected = computed(() => props.session.status === "connected");
-const busy = computed(() => view.value.running || view.value.scripting || view.value.switching);
+const busy = computed(
+  () => view.value.running || view.value.scripting || view.value.switching || view.value.exporting,
+);
 
 function patchSql(sql: string) {
   sessions.updateConfig(props.session.id, { sql });
@@ -43,14 +43,65 @@ function patchSql(sql: string) {
 const menu = ref<{ schema: string; name: string; x: number; y: number } | null>(null);
 const menuEl = ref<HTMLElement | null>(null);
 
-const menuItems = computed(() =>
-  tableSqlMenu().filter((item) => tableSqlAvailable(cfg.value.engine, item.id)),
-);
+const inspectOpen = ref(false);
+const cellView = ref<{ column: string; type: string; value: string } | null>(null);
 
-function fillTable(schema: string, name: string, id: TableSqlId = "preview") {
-  const sql = generateTableSql(cfg.value.engine, schema, name, id);
+const menuItems = computed(() => [
+  { id: "open" as const, label: t("db.open") },
+  { id: "inspect" as const, label: t("db.inspect") },
+  { id: "export" as const, label: t("db.export") },
+]);
+
+function fillTable(schema: string, name: string) {
+  const sql = generateTableSql(cfg.value.engine, schema, name, "preview");
   if (sql) patchSql(sql);
   menu.value = null;
+}
+
+function openTable(schema: string, name: string) {
+  const sql = generateTableSql(cfg.value.engine, schema, name, "open");
+  menu.value = null;
+  if (!sql) return;
+  patchSql(sql);
+  run(sql);
+}
+
+function onMenuItem(schema: string, name: string, id: "open" | "inspect" | "export") {
+  if (id === "open") {
+    openTable(schema, name);
+    return;
+  }
+  if (id === "export") {
+    void exportTable(schema, name);
+    return;
+  }
+  void openInspect(schema, name);
+}
+
+async function exportTable(schema: string, name: string) {
+  menu.value = null;
+  const file = `${name}.sql`;
+  const path = await pickSavePath(file);
+  if (!path) return;
+  await db.exportSql(props.session.id, schema, name, path);
+}
+
+async function exportDatabase() {
+  const dbName = cfg.value.database.trim() || cfg.value.engine;
+  const path = await pickSavePath(`${dbName}.sql`);
+  if (!path) return;
+  await db.exportSql(props.session.id, "", "", path);
+}
+
+async function openInspect(schema: string, name: string) {
+  menu.value = null;
+  inspectOpen.value = true;
+  const ok = await db.inspect(props.session.id, schema, name);
+  if (!ok) inspectOpen.value = false;
+}
+
+function closeInspect() {
+  inspectOpen.value = false;
 }
 
 function onTableMenu(e: MouseEvent, schema: string, name: string) {
@@ -79,8 +130,26 @@ function onWindowClick(e: MouseEvent) {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") closeMenu();
+  if (e.key !== "Escape") return;
+  if (document.querySelector('[role="dialog"]')) return;
+  if (inspectOpen.value) {
+    closeInspect();
+    return;
+  }
+  closeMenu();
 }
+
+function openCell(column: string, type: string, value: string | null) {
+  if (value == null) return;
+  cellView.value = { column, type, value };
+}
+
+watch(connected, (ok) => {
+  if (!ok) {
+    closeInspect();
+    cellView.value = null;
+  }
+});
 
 onMounted(() => {
   window.addEventListener("click", onWindowClick);
@@ -134,7 +203,7 @@ function csvEscape(s: string): string {
 function toCsv(): string {
   const result = view.value.result;
   if (!result?.columns.length) return "";
-  const lines = [result.columns.map(csvEscape).join(",")];
+  const lines = [result.columns.map((c) => csvEscape(c.name)).join(",")];
   for (const row of result.rows) {
     lines.push(row.map((c) => csvEscape(c ?? "")).join(","));
   }
@@ -166,6 +235,7 @@ async function exportCsv() {
 
 const stats = computed(() => {
   const v = view.value;
+  if (v.exporting) return t("db.exporting");
   if (v.scripting || v.scriptLog.length) {
     const last = v.scriptLog[v.scriptLog.length - 1];
     const n = last?.index ?? 0;
@@ -178,9 +248,80 @@ const stats = computed(() => {
   const r = v.result;
   if (!r) return "—";
   if (r.kind === "exec") return t("db.affected", { n: r.affected, ms: r.elapsedMs });
-  const extra = r.truncated ? t("db.truncated") : "";
-  return `${t("db.rows", { n: r.rows.length, ms: r.elapsedMs })}${extra}`;
+  if (r.paged && v.total == null) return t("db.elapsed", { ms: r.elapsedMs });
+  const n = r.paged ? (v.total ?? r.rows.length) : r.rows.length;
+  const extra = !r.paged && r.truncated ? t("db.truncated") : "";
+  return `${t("db.rows", { n, ms: r.elapsedMs })}${extra}`;
 });
+
+const gridEl = ref<HTMLElement | null>(null);
+const pageInput = ref("1");
+
+const grid = computed(() => {
+  const v = view.value;
+  const r = v.result;
+  if (!r || r.kind !== "query" || !r.columns.length) return null;
+  const size = v.pageSize;
+  const rows = r.paged ? r.rows : r.rows.slice((v.page - 1) * size, v.page * size);
+  const start = r.paged ? r.offset : (v.page - 1) * size;
+  const pages = v.total == null ? null : Math.max(1, Math.ceil(v.total / size));
+  const from = rows.length ? start + 1 : 0;
+  const to = start + rows.length;
+  const canNext = r.paged
+    ? pages != null
+      ? v.page < pages
+      : r.hasMore
+    : v.page * size < r.rows.length;
+  return {
+    rows,
+    start,
+    from,
+    to,
+    pages,
+    canNext,
+    show: r.paged || r.truncated || r.rows.length > size || v.page > 1,
+  };
+});
+
+const rangeText = computed(() => {
+  const g = grid.value;
+  if (!g) return "";
+  const total = view.value.total;
+  if (!g.rows.length) {
+    return total === 0 ? t("db.spanOf", { from: 0, to: 0, n: 0 }) : "—";
+  }
+  if (total != null) return t("db.spanOf", { from: g.from, to: g.to, n: total });
+  return t("db.span", { from: g.from, to: g.to });
+});
+
+watch(
+  () => view.value.page,
+  async (page) => {
+    pageInput.value = String(page);
+    await nextTick();
+    gridEl.value?.scrollTo({ top: 0 });
+  },
+);
+watch(
+  () => view.value.running,
+  (running) => {
+    if (!running) pageInput.value = String(view.value.page);
+  },
+);
+
+function commitPage() {
+  const n = Number.parseInt(pageInput.value, 10);
+  if (!Number.isFinite(n) || n < 1) {
+    pageInput.value = String(view.value.page);
+    return;
+  }
+  db.setPage(props.session.id, n);
+  if (!view.value.running) pageInput.value = String(view.value.page);
+}
+
+function onPageSize(value: string) {
+  db.setPageSize(props.session.id, Number(value));
+}
 </script>
 
 <template>
@@ -189,31 +330,56 @@ const stats = computed(() => {
     <div class="flex min-h-0 flex-1">
       <aside
         v-if="connected"
-        class="flex w-48 shrink-0 flex-col border-r border-border bg-bg-1/30"
+        class="flex w-56 shrink-0 flex-col border-r border-border bg-bg-1/30"
       >
-        <div class="flex h-8 items-center justify-between px-2 text-[11px] text-muted-foreground">
-          <span>{{ t("db.tables", { n: view.tables.length }) }}</span>
-          <Button
-            size="xs"
-            variant="ghost"
-            class="h-5 px-1.5 text-[11px]"
-            :disabled="busy"
-            @click="db.listTables(session.id)"
-          >
-            {{ t("common.refresh") }}
-          </Button>
+        <div class="flex h-8 items-center justify-between gap-1 px-2 text-[11px] text-muted-foreground">
+          <span class="min-w-0 truncate">{{ t("db.tables", { n: view.tables.length }) }}</span>
+          <div class="flex shrink-0 items-center">
+            <Button
+              size="xs"
+              variant="ghost"
+              class="h-5 px-1.5 text-[11px]"
+              :disabled="busy || !view.tables.length"
+              @click="exportDatabase"
+            >
+              {{ t("db.exportDb") }}
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              class="h-5 px-1.5 text-[11px]"
+              :disabled="busy"
+              @click="db.listTables(session.id)"
+            >
+              {{ t("common.refresh") }}
+            </Button>
+          </div>
         </div>
         <div data-db-tables class="min-h-0 flex-1 overflow-auto">
           <button
             v-for="tbl in view.tables"
             :key="`${tbl.schema}.${tbl.name}`"
             type="button"
-            class="block w-full truncate px-2 py-1 text-left font-mono text-[12px] text-foreground/90 hover:bg-foreground/5"
-            :title="tableLabel(tbl.schema, tbl.name)"
+            class="block w-full px-2 py-1.5 text-left"
+            :class="
+              inspectOpen && view.inspect?.schema === tbl.schema && view.inspect?.name === tbl.name
+                ? 'bg-primary/12'
+                : 'hover:bg-foreground/5'
+            "
+            :title="[tableLabel(cfg.engine, tbl.schema, tbl.name), tbl.comment].filter(Boolean).join('\n')"
             @click="fillTable(tbl.schema, tbl.name)"
+            @dblclick.prevent="openTable(tbl.schema, tbl.name)"
             @contextmenu="onTableMenu($event, tbl.schema, tbl.name)"
           >
-            {{ tableLabel(tbl.schema, tbl.name) }}
+            <div class="truncate font-mono text-[13px] font-medium text-foreground">
+              {{ tableLabel(cfg.engine, tbl.schema, tbl.name) }}
+            </div>
+            <div
+              v-if="tbl.comment"
+              class="mt-0.5 truncate text-[10px] leading-4 text-muted-foreground/65"
+            >
+              {{ tbl.comment }}
+            </div>
           </button>
           <div
             v-if="view.tables.length === 0"
@@ -266,7 +432,8 @@ const stats = computed(() => {
             {{ stats }}
           </span>
         </div>
-        <div class="min-h-0 flex-[3] overflow-auto">
+        <div class="flex min-h-0 flex-[3] flex-col">
+        <div ref="gridEl" class="min-h-0 flex-1 overflow-auto">
           <div
             v-if="view.scriptLog.length"
             class="space-y-0.5 px-3 py-2 font-mono text-[12px]"
@@ -288,7 +455,7 @@ const stats = computed(() => {
             </div>
           </div>
           <div
-            v-else-if="view.error"
+            v-else-if="view.error && !grid"
             class="px-3 py-2 font-mono text-[12px] text-err"
           >
             {{ view.error }}
@@ -300,32 +467,45 @@ const stats = computed(() => {
             {{ stats }}
           </div>
           <table
-            v-else-if="view.result?.columns.length"
+            v-else-if="grid"
             class="w-max min-w-full border-collapse text-[12px]"
           >
             <thead class="sticky top-0 bg-bg-1">
               <tr>
+                <th class="w-10 border-b border-border px-1.5 py-1" />
                 <th
-                  v-for="col in view.result.columns"
-                  :key="col"
+                  v-for="col in view.result?.columns ?? []"
+                  :key="col.name"
                   class="border-b border-border px-2 py-1 text-left font-medium whitespace-nowrap"
                 >
-                  {{ col }}
+                  <div class="font-mono text-[12px]">{{ col.pk ? "# " : "" }}{{ col.name }}</div>
+                  <div
+                    v-if="col.type || col.comment"
+                    class="text-[10px] font-normal text-muted-foreground"
+                  >
+                    {{ col.type }}<template v-if="col.type && col.comment"> · </template>{{ col.comment }}
+                  </div>
                 </th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="(row, i) in view.result.rows"
-                :key="i"
+                v-for="(row, i) in grid.rows"
+                :key="grid.start + i"
                 class="hover:bg-foreground/4"
               >
+                <td class="border-b border-border/60 px-1.5 py-0.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+                  {{ grid.start + i + 1 }}
+                </td>
                 <td
                   v-for="(cell, j) in row"
                   :key="j"
                   class="max-w-xs truncate border-b border-border/60 px-2 py-0.5 font-mono whitespace-nowrap"
+                  :class="cell == null ? 'text-muted-foreground/60' : 'cursor-pointer'"
                   :title="cell ?? 'NULL'"
-                  :class="cell == null ? 'text-muted-foreground/60' : ''"
+                  @dblclick.prevent="
+                    openCell(view.result?.columns[j]?.name ?? '', view.result?.columns[j]?.type ?? '', cell)
+                  "
                 >
                   {{ cell == null ? "NULL" : cell }}
                 </td>
@@ -339,8 +519,84 @@ const stats = computed(() => {
             —
           </div>
         </div>
+        <div
+          v-if="grid?.show && !view.scriptLog.length"
+          class="flex h-8 shrink-0 items-center gap-0.5 border-t border-border px-2"
+        >
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            :title="t('db.first')"
+            :disabled="busy || view.page <= 1"
+            @click="db.setPage(session.id, 1)"
+          >
+            <ChevronsLeft />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            :title="t('db.prev')"
+            :disabled="busy || view.page <= 1"
+            @click="db.setPage(session.id, view.page - 1)"
+          >
+            <ChevronLeft />
+          </Button>
+          <input
+            v-model="pageInput"
+            class="h-6 w-10 rounded-md border border-border bg-transparent text-center font-mono text-[12px] outline-none disabled:opacity-50"
+            :disabled="busy"
+            @keydown.enter.prevent="commitPage"
+            @blur="commitPage"
+          />
+          <span v-if="grid.pages != null" class="px-0.5 text-[11px] tabular-nums text-muted-foreground">
+            / {{ grid.pages }}
+          </span>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            :title="t('db.next')"
+            :disabled="busy || !grid.canNext"
+            @click="db.setPage(session.id, view.page + 1)"
+          >
+            <ChevronRight />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            :title="t('db.last')"
+            :disabled="busy || grid.pages == null || view.page >= grid.pages"
+            @click="grid.pages != null && db.setPage(session.id, grid.pages)"
+          >
+            <ChevronsRight />
+          </Button>
+          <AppSelect
+            :model-value="view.pageSize"
+            :options="DB_PAGE_SIZES"
+            class="ml-1"
+            :disabled="busy"
+            @update:model-value="onPageSize"
+          />
+          <span class="ml-auto truncate text-[11px] tabular-nums text-muted-foreground">{{ rangeText }}</span>
+        </div>
+        </div>
       </div>
+      <TableInspect
+        v-if="inspectOpen"
+        :session-id="session.id"
+        :engine="cfg.engine"
+        @close="closeInspect"
+        @open="openTable"
+        @fill="patchSql"
+        @export="exportTable"
+      />
     </div>
+    <CellViewer
+      v-if="cellView"
+      :column="cellView.column"
+      :type="cellView.type"
+      :value="cellView.value"
+      @close="cellView = null"
+    />
     <div
       v-if="menu"
       ref="menuEl"
@@ -349,15 +605,11 @@ const stats = computed(() => {
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
       @click.stop
     >
-      <template v-for="(item, i) in menuItems" :key="item.id">
-        <div
-          v-if="i > 0 && menuItems[i - 1]?.group !== item.group"
-          class="my-1 h-px bg-border"
-        />
+      <template v-for="item in menuItems" :key="item.id">
         <button
           type="button"
           class="flex w-full rounded-md px-2.5 py-1 text-left text-[13px] hover:bg-accent"
-          @click="fillTable(menu.schema, menu.name, item.id)"
+          @click="onMenuItem(menu.schema, menu.name, item.id)"
         >
           {{ item.label }}
         </button>

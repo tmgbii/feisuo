@@ -35,6 +35,7 @@ export const LAB_SLAVE_ID = "feisuo-lab-slave";
 interface RxBatch {
   sessionId: string;
   frames: { data: number[]; source?: string | null }[];
+  dropped?: number;
 }
 interface StatusPayload {
   sessionId: string;

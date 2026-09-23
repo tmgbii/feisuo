@@ -52,6 +52,12 @@ export async function invokeListPorts(): Promise<SerialPortInfo[]> {
   return invoke<SerialPortInfo[]>("list_serial_ports");
 }
 
+export async function invokeUiAlive(): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("ui_alive");
+}
+
 export function errorMessage(err: unknown): string {
   let raw = "";
   if (typeof err === "string") raw = err;

@@ -46,6 +46,7 @@ export const RAIL_PROTOCOLS: Record<RailId, ProtocolType[] | null> = {
   ftp: ["ftp"],
   db: ["db"],
   ai: ["ai"],
+  net: null,
   modbus: null,
   tools: null,
   settings: null,
@@ -112,8 +113,8 @@ export function defaultConfig(protocol: ProtocolType): SessionConfig {
         method: "GET",
         url: "http://127.0.0.1:8080",
         params: [{ key: "", value: "" }],
-        headers: [{ key: "Content-Type", value: "application/json" }],
-        body: "{\n  \n}",
+        headers: [{ key: "", value: "" }],
+        body: "",
         authType: "none",
         authUser: "",
         authPass: "",
@@ -148,19 +149,36 @@ export function normalizeAiConfig(cfg: Partial<AiConfig> | undefined): AiConfig 
 }
 
 export function dbDefaultPort(engine: DbEngine): number {
-  return engine === "mysql" ? 3306 : 5432;
+  if (engine === "mysql") return 3306;
+  if (engine === "sqlserver") return 1433;
+  return 5432;
+}
+
+function dbDefaultUser(engine: DbEngine): string {
+  if (engine === "mysql") return "root";
+  if (engine === "sqlserver") return "sa";
+  return "postgres";
+}
+
+function dbDefaultDatabase(engine: DbEngine): string {
+  if (engine === "mysql" || engine === "sqlserver") return "";
+  return "postgres";
+}
+
+function asDbEngine(value: string | undefined): DbEngine {
+  if (value === "mysql" || value === "sqlite" || value === "sqlserver") return value;
+  return "postgres";
 }
 
 export function normalizeDbConfig(cfg: Partial<DbConfig> | undefined): DbConfig {
-  const engine: DbEngine =
-    cfg?.engine === "mysql" || cfg?.engine === "sqlite" ? cfg.engine : "postgres";
+  const engine = asDbEngine(cfg?.engine);
   return {
     kind: "db",
     engine,
     host: cfg?.host ?? "127.0.0.1",
     port: Number(cfg?.port) || dbDefaultPort(engine),
-    database: cfg?.database ?? (engine === "mysql" ? "" : "postgres"),
-    user: cfg?.user ?? (engine === "mysql" ? "root" : "postgres"),
+    database: cfg?.database ?? dbDefaultDatabase(engine),
+    user: cfg?.user ?? dbDefaultUser(engine),
     password: cfg?.password ?? "",
     file: cfg?.file ?? "",
     selectOnly: Boolean(cfg?.selectOnly),

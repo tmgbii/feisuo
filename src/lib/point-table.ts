@@ -21,6 +21,9 @@ export interface DecodedPoint {
   text: string;
   raw: string;
   unit: string;
+  span?: number;
+  byteOffset?: number;
+  byteSize?: number;
   error?: string;
 }
 
@@ -195,8 +198,12 @@ export function decodePoints(
     const span = pointSpan(point.type);
     if (point.address < start || point.address + span > end) continue;
     const offset = point.address - start;
-    if (point.type === "bool" || payload.kind === "coils") {
-      const byte = payload.bytes[Math.floor(offset / 8)] ?? 0;
+    const coils = point.type === "bool" || payload.kind === "coils";
+    const byteOffset = coils ? Math.floor(offset / 8) : offset * 2;
+    const byteSize = coils ? 1 : span * 2;
+    const located = { span, byteOffset, byteSize };
+    if (coils) {
+      const byte = payload.bytes[byteOffset] ?? 0;
       const bit = (byte >> (offset % 8)) & 1;
       out.push({
         name: point.name,
@@ -204,10 +211,11 @@ export function decodePoints(
         text: bit ? "ON" : "OFF",
         raw: String(bit),
         unit: point.unit,
+        ...located,
       });
       continue;
     }
-    const byteIndex = offset * 2;
+    const byteIndex = byteOffset;
     try {
       if (span === 1) {
         const hi = payload.bytes[byteIndex] ?? 0;
@@ -220,6 +228,7 @@ export function decodePoints(
           text: formatValue(raw, point.scale, point.offset, point.digits),
           raw: `0x${u.toString(16).toUpperCase().padStart(4, "0")}`,
           unit: point.unit,
+          ...located,
         });
       } else {
         const word = [
@@ -243,6 +252,7 @@ export function decodePoints(
           text: formatValue(raw, point.scale, point.offset, point.digits),
           raw: word.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
           unit: point.unit,
+          ...located,
         });
       }
     } catch (err) {
@@ -252,6 +262,7 @@ export function decodePoints(
         text: "—",
         raw: "",
         unit: point.unit,
+        ...located,
         error: err instanceof Error ? err.message : t("err.decodeFail"),
       });
     }

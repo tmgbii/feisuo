@@ -11,6 +11,7 @@ import {
   Radio,
   Settings,
   Terminal,
+  Waypoints,
   Wrench,
 } from "@lucide/vue";
 import type { RailId } from "@/types";
@@ -36,13 +37,14 @@ const items = computed(() =>
     { id: "ssh" as RailId, label: t("rail.ssh"), icon: Terminal },
     { id: "ftp" as RailId, label: t("rail.ftp"), icon: Folder },
     { id: "db" as RailId, label: t("rail.db"), icon: Database },
-    { id: "modbus" as RailId, label: t("rail.sim"), icon: Binary },
   ] as { id: RailId; label: string; icon: Component }[],
 );
 
 const bottom = computed(() =>
   [
     { id: "ai" as RailId, label: t("rail.ai"), icon: Bot },
+    { id: "net" as RailId, label: t("rail.net"), icon: Waypoints },
+    { id: "modbus" as RailId, label: t("rail.sim"), icon: Binary },
     { id: "tools" as RailId, label: t("rail.tools"), icon: Wrench },
     { id: "settings" as RailId, label: t("rail.settings"), icon: Settings },
   ] as { id: RailId; label: string; icon: Component }[],

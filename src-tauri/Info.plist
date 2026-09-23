@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>连接局域网内的 MQTT、TCP 等设备。</string>
+  <string>连接局域网内的 MQTT、TCP、数据库等设备。</string>
 </dict>
 </plist>

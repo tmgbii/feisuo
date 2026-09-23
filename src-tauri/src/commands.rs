@@ -69,6 +69,11 @@ pub async fn kick_tcp_client(
 }
 
 #[tauri::command]
+pub fn ui_alive(state: State<AppState>) {
+    state.touch_ui();
+}
+
+#[tauri::command]
 pub fn app_quit(app: AppHandle) {
     app.exit(0);
 }

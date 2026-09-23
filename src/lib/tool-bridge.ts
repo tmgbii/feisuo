@@ -2,7 +2,7 @@ import { ref } from "vue";
 import { useUiStore } from "@/stores/ui";
 import { useSessionsStore } from "@/stores/sessions";
 
-export type ToolTab = "modbus" | "json" | "history" | "ascii" | "more" | "parse" | "net";
+export type ToolTab = "modbus" | "json" | "history" | "ascii" | "more" | "parse";
 
 export const toolTab = ref<ToolTab>("modbus");
 export const pendingModbusParse = ref<string | null>(null);
@@ -40,7 +40,5 @@ export function openJsonTool(text?: string) {
 }
 
 export function openNetWatch() {
-  const ui = useUiStore();
-  toolTab.value = "net";
-  ui.setRail("tools");
+  useUiStore().setRail("net");
 }

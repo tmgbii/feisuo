@@ -67,6 +67,7 @@ pub fn run() {
             commands::mqtt_subscribe,
             commands::mqtt_unsubscribe,
             commands::kick_tcp_client,
+            commands::ui_alive,
             http::http_request,
             ai::ai_chat,
             ai::ai_stop,
@@ -107,7 +108,10 @@ pub fn run() {
             db::db_connect,
             db::db_disconnect,
             db::db_query,
+            db::db_count,
             db::db_tables,
+            db::db_inspect,
+            db::db_export,
             db::db_databases,
             db::db_use,
             db::db_script,
@@ -134,7 +138,7 @@ pub fn run() {
         .expect("error while running 飞梭");
 }
 
-fn probe_local_network() {
+pub(crate) fn probe_local_network() {
     #[cfg(target_os = "macos")]
     {
         // hostName 在本进程触发「本地网络」对话框；组播作补。

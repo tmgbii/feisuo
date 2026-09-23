@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick } from "vue";
 import type { HTMLAttributes } from "vue";
 import { toast } from "vue-sonner";
 import { t } from "@/i18n";
 import type { DataMode } from "@/types";
-import { bytesToHex, bytesToText, hexToBytes, isValidHex, textToBytes } from "@/lib/hex";
+import { bytesToHex, bytesToText, hexToBytes, isValidHex, takeHexPaste, textToBytes } from "@/lib/hex";
 import { payloadFromMode } from "@/lib/radix";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,6 +25,16 @@ const emit = defineEmits<{
 }>();
 
 const radix = computed(() => payloadFromMode(props.mode));
+
+function onPaste(event: ClipboardEvent) {
+  if (props.mode !== "hex") return;
+  const next = takeHexPaste(event, props.modelValue);
+  if (!next) return;
+  event.preventDefault();
+  emit("update:modelValue", next.text);
+  const el = event.target as HTMLTextAreaElement;
+  void nextTick(() => el.setSelectionRange(next.caret, next.caret));
+}
 
 function onToggle() {
   if (props.mode === "hex") {
@@ -54,6 +64,7 @@ const hint = computed(() => {
       :aria-invalid="invalid || undefined"
       class="selectable min-h-20 resize-none pr-10 font-mono text-[13px]"
       @update:model-value="emit('update:modelValue', String($event))"
+      @paste="onPaste"
       @keydown="emit('keydown', $event)"
     />
     <RadixToggle

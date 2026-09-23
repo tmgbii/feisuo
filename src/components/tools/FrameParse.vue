@@ -1,32 +1,32 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { Plus, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { t } from "@/i18n";
-import { parseFrames } from "@/lib/frame-engine";
-import { enrichModbusFrame, schemaLooksModbus, type ShownFrame } from "@/lib/frame-modbus";
+import { parseFrames, type FrameSpan } from "@/lib/frame-engine";
+import { formatHexDump, takeHexPaste } from "@/lib/hex";
+import { enrichModbusFrame, lastModbusStart, schemaLooksModbus, type ShownFrame } from "@/lib/frame-modbus";
 import { parseModbus } from "@/lib/modbus";
 import {
   blankField,
   blankSchema,
   CHECKSUM_ALGOS,
   FIELD_TYPES,
-  METER_FIXTURE,
-  METER_FIXTURE_HEX,
   schemaLabel,
   type FrameEndian,
   type FrameField,
   type FrameSchema,
 } from "@/lib/frame-schema";
-import { SCHEMA_PROMPT } from "@/lib/frame-builtins";
+import { BUILTIN_SCHEMAS, SCHEMA_PROMPT } from "@/lib/frame-builtins";
 import { exportFrameSchemas, importFrameSchemas } from "@/lib/frame-pack";
 import { pendingFrameParse } from "@/lib/tool-bridge";
 import { useFrameSchemasStore } from "@/stores/frame-schemas";
 import { useSessionsStore } from "@/stores/sessions";
 import { useUiStore } from "@/stores/ui";
+import type { DecodedPoint } from "@/lib/point-table";
 import AppSelect from "@/components/common/AppSelect.vue";
-import ToolFold from "@/components/tools/ToolFold.vue";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -35,14 +35,18 @@ const props = defineProps<{ compact?: boolean }>();
 const store = useFrameSchemasStore();
 const sessions = useSessionsStore();
 const ui = useUiStore();
-const hex = ref(METER_FIXTURE_HEX);
+const openingSample = BUILTIN_SCHEMAS[0]?.sample ?? "";
+const hex = ref(openingSample);
 const frames = ref<ShownFrame[]>([]);
 const jsonText = ref("");
 const showJson = ref(false);
 const useLength = ref(true);
 const useChecksum = ref(true);
-const fold = ref("");
-let lastSample = METER_FIXTURE.sample ?? METER_FIXTURE_HEX;
+const schemaOpen = ref(false);
+const hover = ref("");
+let lastSample = openingSample;
+
+const FIELD_TONES = ["bg-primary/40", "bg-primary/20", "bg-foreground/20", "bg-primary/12", "bg-foreground/10"];
 
 const draft = reactive<FrameSchema>(clone(store.active ?? blankSchema()));
 
@@ -81,6 +85,13 @@ watch(
 );
 
 watch(
+  () => sessions.visibleMessages.length,
+  () => {
+    if (frames.value.length && hex.value.trim()) run();
+  },
+);
+
+watch(
   pendingFrameParse,
   (text) => {
     if (!text) return;
@@ -109,21 +120,38 @@ function schemaForParse(): FrameSchema {
   return clone(draft);
 }
 
-function lastTxStart(): number {
-  for (const message of [...sessions.visibleMessages].reverse()) {
-    if (message.direction !== "tx") continue;
-    try {
-      const addr = parseModbus(message.hex).address;
-      if (addr != null) return addr;
-    } catch {
-      /* skip */
-    }
+function firstPointAddr(): number | undefined {
+  const point = ui.modbusPoints[0];
+  return point && Number.isFinite(point.address) ? point.address : undefined;
+}
+
+function startHintFor(frameHex: string): number {
+  const fromTable = firstPointAddr();
+  if (fromTable != null) return fromTable;
+  try {
+    const mb = parseModbus(frameHex);
+    return lastModbusStart(sessions.visibleMessages, {
+      slave: mb.slave,
+      func: mb.func,
+    }) ?? 0;
+  } catch {
+    return lastModbusStart(sessions.visibleMessages) ?? 0;
   }
-  return 0;
+}
+
+function onHexPaste(event: ClipboardEvent) {
+  const next = takeHexPaste(event, hex.value);
+  if (!next) return;
+  event.preventDefault();
+  hex.value = next.text;
+  const el = event.target as HTMLTextAreaElement;
+  void nextTick(() => el.setSelectionRange(next.caret, next.caret));
 }
 
 function run() {
   syncFlags();
+  const formatted = formatHexDump(hex.value);
+  if (formatted) hex.value = formatted;
   if (!hex.value.trim()) {
     frames.value = [];
     return;
@@ -131,7 +159,7 @@ function run() {
   const schema = schemaForParse();
   const parsed = parseFrames(schema, hex.value);
   frames.value = schemaLooksModbus(schema)
-    ? parsed.map((frame) => enrichModbusFrame(frame, ui.modbusPoints, lastTxStart()))
+    ? parsed.map((frame) => enrichModbusFrame(frame, ui.modbusPoints, startHintFor(frame.hex)))
     : parsed;
 }
 
@@ -173,7 +201,6 @@ function dumpJson() {
     2,
   );
   showJson.value = true;
-  if (props.compact) fold.value = "schema";
 }
 
 async function copyPrompt() {
@@ -219,6 +246,132 @@ function kindLabel(kind: ShownFrame["kind"]) {
   if (kind === "ok") return t("tools.frameOk");
   if (kind === "partial") return t("tools.framePartial");
   return t("tools.frameMiss");
+}
+
+function hexTokens(value: string) {
+  return value.trim() ? value.trim().split(/\s+/) : [];
+}
+
+function statusNote(frame: ShownFrame) {
+  if (!frame.note || frame.note === kindLabel(frame.kind)) return "";
+  return frame.note;
+}
+
+function spanCovered(span: FrameSpan, spans: FrameSpan[]) {
+  if (span.role !== "field" || span.size <= 1) return false;
+  const smaller = spans.filter((item) => item.role === "field" && item.key !== span.key && item.size < span.size);
+  for (let i = span.offset; i < span.offset + span.size; i += 1) {
+    if (!smaller.some((item) => i >= item.offset && i < item.offset + item.size)) return false;
+  }
+  return true;
+}
+
+function legendOf(frame: ShownFrame) {
+  const spans = frame.spans ?? [];
+  const fields = spans.filter((span) => span.role === "field" && !spanCovered(span, spans));
+  return spans
+    .filter((span) => {
+      if (spanCovered(span, spans)) return false;
+      if (span.role === "field") return true;
+      return !fields.some((field) => field.offset === span.offset && field.size === span.size);
+    })
+    .sort((a, b) => a.offset - b.offset || a.size - b.size);
+}
+
+function directionOf(frame: ShownFrame) {
+  return frame.fields.find((field) => field.name === t("tools.direction"))?.value ?? "";
+}
+
+function shownFields(frame: ShownFrame) {
+  const spans = frame.spans ?? [];
+  const direction = t("tools.direction");
+  return frame.fields.filter((field) => {
+    if (field.name === direction) return false;
+    const span = spans.find((item) => item.key === field.spanKey);
+    return !span || !spanCovered(span, spans);
+  });
+}
+
+function plainValue(value: string) {
+  return value.replace(/\s*\((?:0x)?[0-9A-Fa-f ]+\)\s*$/, "").trim();
+}
+
+function spanLabel(span: FrameSpan) {
+  if (span.role === "head") return t("tools.head");
+  if (span.role === "tail") return t("tools.tail");
+  if (span.role === "length") return t("tools.lenField");
+  if (span.role === "checksum") return t("composer.checksum");
+  return schemaLabel(span.name);
+}
+
+function spanClass(span: FrameSpan, checksumOk?: boolean) {
+  if (span.role === "checksum") return checksumOk === false ? "bg-err/40" : "bg-rx/25";
+  if (span.role === "head") return "bg-tx/20";
+  if (span.role === "tail") return "ring-1 ring-inset ring-foreground/40";
+  if (span.role === "length") return "bg-warn/25";
+  return FIELD_TONES[(span.tone ?? 0) % FIELD_TONES.length] ?? FIELD_TONES[0];
+}
+
+function covering(spans: FrameSpan[], index: number) {
+  return spans.filter((span) => index >= span.offset && index < span.offset + span.size);
+}
+
+function activeKey(frameIndex: number) {
+  const prefix = `${frameIndex}:`;
+  return hover.value.startsWith(prefix) ? hover.value.slice(prefix.length) : "";
+}
+
+function byteClass(frame: ShownFrame, frameIndex: number, byteIndex: number) {
+  const spans = frame.spans ?? [];
+  const cover = covering(spans, byteIndex);
+  const active = activeKey(frameIndex);
+  if (active.startsWith("point:")) {
+    const point = frame.points?.[Number(active.slice(6))];
+    const on = point?.byteOffset != null
+      && point.byteSize != null
+      && byteIndex >= point.byteOffset
+      && byteIndex < point.byteOffset + point.byteSize;
+    return on ? "bg-primary/35" : "opacity-30";
+  }
+  if (active) {
+    const span = spans.find((item) => item.key === active);
+    const on = span != null && byteIndex >= span.offset && byteIndex < span.offset + span.size;
+    return on && span ? spanClass(span, frame.checksumOk) : "opacity-30";
+  }
+  if (cover.some((span) => span.role === "checksum") && frame.checksumOk === false) return "bg-err/40";
+  const fields = cover.filter((span) => span.role === "field");
+  if (fields.length) {
+    const specific = [...fields].sort((a, b) => a.size - b.size)[0];
+    return specific ? spanClass(specific, frame.checksumOk) : "";
+  }
+  const structural = cover.find((span) => span.role === "checksum")
+    ?? cover.find((span) => span.role === "head")
+    ?? cover.find((span) => span.role === "tail")
+    ?? cover.find((span) => span.role === "length");
+  return structural ? spanClass(structural, frame.checksumOk) : "";
+}
+
+function enter(frameIndex: number, key?: string) {
+  hover.value = key ? `${frameIndex}:${key}` : "";
+}
+
+function enterByte(frame: ShownFrame, frameIndex: number, byteIndex: number) {
+  const fields = covering(frame.spans ?? [], byteIndex).filter((span) => span.role === "field");
+  const key = (fields.length ? [...fields].sort((a, b) => a.size - b.size)[0] : covering(frame.spans ?? [], byteIndex)[0])?.key;
+  enter(frameIndex, key);
+}
+
+function pointAddr(item: DecodedPoint) {
+  if (item.span && item.span > 1) return `${item.address}–${item.address + item.span - 1}`;
+  return String(item.address);
+}
+
+function pointTitle(item: DecodedPoint) {
+  return [pointAddr(item), item.raw, item.error].filter(Boolean).join(" · ");
+}
+
+function showRaw(value: string, raw: string) {
+  return Boolean(raw) && raw !== value;
 }
 </script>
 
@@ -302,6 +455,7 @@ function kindLabel(kind: ShownFrame["kind"]) {
         <Textarea
           v-model="hex"
           :class="cn('font-mono text-[13px]', props.compact ? 'min-h-20 resize-none' : 'min-h-24')"
+          @paste="onHexPaste"
         />
         <div v-if="showJson" class="space-y-1">
           <Textarea v-model="jsonText" class="min-h-24 font-mono text-[12px]" :disabled="readonly" />
@@ -318,52 +472,114 @@ function kindLabel(kind: ShownFrame["kind"]) {
           v-for="(frame, i) in frames"
           :key="i"
           class="rounded-md border border-border bg-bg-1/70 px-3 py-2"
+          @mouseleave="hover = ''"
         >
-          <header class="mb-1 flex flex-wrap items-center gap-2 text-[11px]">
+          <header class="mb-1 flex flex-wrap items-baseline gap-x-2 text-[11px]">
             <span :class="kindClass(frame.kind)">{{ kindLabel(frame.kind) }}</span>
-            <span v-if="frame.note" class="text-muted-foreground">{{ frame.note }}</span>
-            <span
-              v-if="frame.checksumOk != null"
-              :class="frame.checksumOk ? 'text-rx' : 'text-err'"
-            >
-              {{ frame.checksumOk ? t("tools.crcOk") : t("tools.crcBad", { expect: frame.checksumExpect ?? "", got: frame.checksumGot ?? "" }) }}
+            <span v-if="directionOf(frame)">{{ directionOf(frame) }}</span>
+            <span v-if="statusNote(frame)" class="text-muted-foreground">{{ statusNote(frame) }}</span>
+            <span v-if="frame.checksumOk != null" :class="frame.checksumOk ? 'text-rx' : 'text-err'">
+              <template v-if="frame.checksumOk">
+                {{ t("tools.crcOk") }}
+                <span class="font-mono tabular-nums">{{ frame.checksumGot }}</span>
+              </template>
+              <template v-else>
+                {{ t("tools.crcBad", { expect: frame.checksumExpect ?? "", got: frame.checksumGot ?? "" }) }}
+              </template>
             </span>
           </header>
-          <pre class="font-mono text-[12px] break-all whitespace-pre-wrap text-muted-foreground">{{ frame.hex }}</pre>
-          <div v-if="frame.points?.length" class="mt-2 space-y-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5">
-            <div
-              v-for="item in frame.points"
-              :key="`${item.name}-${item.address}`"
-              class="flex items-baseline justify-between gap-2 text-[12px]"
-            >
-              <span class="text-muted-foreground">{{ item.name }}</span>
-              <span class="font-mono">
-                {{ item.text }}
-                <span v-if="item.unit" class="text-muted-foreground">{{ item.unit }}</span>
-              </span>
-            </div>
+          <div class="selectable flex flex-wrap gap-x-1 gap-y-0.5 font-mono text-[12px] tabular-nums leading-5">
+            <span
+              v-for="(byte, bi) in hexTokens(frame.hex)"
+              :key="bi"
+              class="rounded-sm px-0.5"
+              :class="byteClass(frame, i, bi)"
+              @mouseenter="enterByte(frame, i, bi)"
+            >{{ byte }}</span>
           </div>
-          <table v-if="frame.fields.length" class="mt-2 w-full text-[12px]">
+          <div v-if="legendOf(frame).length" class="mt-1 flex flex-wrap gap-1">
+            <span
+              v-for="span in legendOf(frame)"
+              :key="span.key"
+              class="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-muted-foreground"
+              @mouseenter="enter(i, span.key)"
+            >
+              <span class="inline-block size-2 rounded-sm" :class="spanClass(span, frame.checksumOk)" />
+              {{ spanLabel(span) }}
+            </span>
+          </div>
+          <table v-if="frame.points?.length" class="mt-2 w-full text-[12px]">
+            <caption class="mb-0.5 text-left text-[11px] text-muted-foreground">{{ t("tools.points") }}</caption>
             <thead class="text-[11px] text-muted-foreground">
               <tr>
-                <th class="py-0.5 text-left font-medium">{{ t("tools.field") }}</th>
+                <th class="py-0.5 text-left font-medium">{{ t("common.name") }}</th>
                 <th class="py-0.5 text-left font-medium">{{ t("tools.value") }}</th>
-                <th class="py-0.5 text-left font-medium">{{ t("tools.raw") }}</th>
+                <th class="py-0.5 text-left font-medium">{{ t("tools.unit") }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="field in frame.fields" :key="field.name" class="border-t border-border/60">
-                <td class="py-0.5 pr-2">{{ schemaLabel(field.name) }}</td>
-                <td class="py-0.5 pr-2 font-mono">{{ field.value }}</td>
-                <td class="py-0.5 font-mono text-muted-foreground">{{ field.raw }}</td>
+              <tr
+                v-for="(item, pi) in frame.points"
+                :key="`${item.name}-${item.address}`"
+                class="border-t border-border/60"
+                :class="activeKey(i) === `point:${pi}` ? 'bg-primary/10' : ''"
+                @mouseenter="enter(i, item.byteOffset == null ? undefined : `point:${pi}`)"
+              >
+                <td class="whitespace-nowrap py-0.5 pr-3" :title="pointTitle(item)">
+                  <span class="mr-1 font-mono text-[11px] tabular-nums text-muted-foreground">{{ pointAddr(item) }}</span>
+                  {{ item.name }}
+                </td>
+                <td class="py-0.5 pr-2 font-mono tabular-nums" :title="pointTitle(item)">{{ item.text }}</td>
+                <td class="py-0.5 text-muted-foreground">{{ item.unit }}</td>
               </tr>
             </tbody>
           </table>
+          <div
+            v-if="shownFields(frame).length"
+            :class="frame.points?.length ? 'mt-3 border-t border-border pt-2' : 'mt-2'"
+          >
+          <table class="w-full text-[12px]">
+            <thead class="text-[11px] text-muted-foreground">
+              <tr>
+                <th class="w-[5.5rem] whitespace-nowrap py-0.5 pr-3 text-left font-medium">{{ t("tools.field") }}</th>
+                <th class="whitespace-nowrap py-0.5 pr-3 text-left font-medium">{{ t("tools.value") }}</th>
+                <th class="py-0.5 text-left font-medium">HEX</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(field, fi) in shownFields(frame)"
+                :key="field.spanKey ?? `${field.name}-${fi}`"
+                class="border-t border-border/60"
+                :class="field.spanKey && activeKey(i) === field.spanKey ? 'bg-primary/10' : ''"
+                @mouseenter="enter(i, field.spanKey)"
+              >
+                <td class="whitespace-nowrap py-0.5 pr-3">{{ schemaLabel(field.name) }}</td>
+                <template v-if="showRaw(plainValue(field.value), field.raw)">
+                  <td class="whitespace-nowrap py-0.5 pr-3 font-mono tabular-nums">
+                    {{ plainValue(field.value) }}
+                    <span v-if="field.unit" class="text-muted-foreground">{{ field.unit }}</span>
+                  </td>
+                  <td class="py-0.5 font-mono tabular-nums text-muted-foreground">{{ field.raw }}</td>
+                </template>
+                <td v-else colspan="2" class="py-0.5 font-mono tabular-nums">{{ field.raw || field.value }}</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
         </article>
       </section>
 
-      <ToolFold v-if="props.compact" v-model="fold" title="schema" class="shrink-0">
-        <div class="max-h-64 space-y-2 overflow-auto">
+      <div v-if="props.compact" class="flex shrink-0 items-center gap-2 rounded-md border border-border px-2 py-1.5">
+        <span class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">schema · {{ schemaLabel(draft.name) }}</span>
+        <Button size="xs" variant="outline" @click="schemaOpen = true">{{ t("common.edit") }}</Button>
+      </div>
+      <Dialog v-if="props.compact" v-model:open="schemaOpen">
+        <DialogContent class="flex max-h-[min(640px,85vh)] w-[min(560px,92vw)] flex-col gap-3 overflow-hidden sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle class="text-sm">schema</DialogTitle>
+          </DialogHeader>
+          <div class="min-h-0 flex-1 space-y-2 overflow-auto">
           <div class="flex gap-1">
             <Input :model-value="readonly ? schemaLabel(draft.name) : draft.name" class="h-7 min-w-0 flex-1" :disabled="readonly" :placeholder="t('common.name')" @update:model-value="draft.name = String($event)" />
             <AppSelect
@@ -453,62 +669,66 @@ function kindLabel(kind: ShownFrame["kind"]) {
           <div
             v-for="(field, i) in draft.fields"
             :key="i"
-            class="space-y-1 rounded-md border border-border p-1.5"
+            class="space-y-1 rounded-md border border-border px-2 py-1.5"
           >
-            <div class="flex gap-1">
+            <div class="flex items-center gap-1">
               <Input :model-value="readonly ? schemaLabel(field.name) : field.name" class="h-7 min-w-0 flex-1" :placeholder="t('tools.fieldName')" :disabled="readonly" @update:model-value="field.name = String($event)" />
-              <Button size="icon-xs" variant="ghost" class="text-err" :disabled="readonly" @click="removeField(i)">
-                <Trash2 class="size-3.5" />
-              </Button>
-            </div>
-            <div class="grid grid-cols-3 gap-1">
               <Input
-                class="h-7 font-mono"
+                class="h-7 w-14 shrink-0 font-mono"
                 :model-value="String(field.offset)"
                 :disabled="readonly"
                 placeholder="off"
+                :title="t('tools.lenOff')"
                 @update:model-value="field.offset = Number($event) || 0"
               />
               <Input
-                class="h-7 font-mono"
+                class="h-7 w-12 shrink-0 font-mono"
                 :model-value="fieldSize(field)"
                 :disabled="readonly"
                 placeholder="size"
+                :title="t('tools.lenSize')"
                 @update:model-value="setFieldSize(field, $event)"
               />
               <AppSelect
+                class="w-auto shrink-0"
                 :model-value="field.type"
                 :options="FIELD_TYPES"
                 :disabled="readonly"
                 @update:model-value="field.type = $event as FrameField['type']"
               />
+              <Button size="icon-xs" variant="ghost" class="text-err" :disabled="readonly" @click="removeField(i)">
+                <Trash2 class="size-3.5" />
+              </Button>
             </div>
-            <div class="grid grid-cols-2 gap-1">
+            <div class="flex items-center gap-1">
               <AppSelect
+                class="w-[4.75rem] shrink-0"
                 :model-value="field.endian ?? 'default'"
                 :options="fieldEndianOptions"
                 :disabled="readonly"
                 @update:model-value="field.endian = $event === 'default' ? undefined : ($event as FrameEndian)"
               />
               <Input
-                class="h-7 font-mono"
+                class="h-7 w-16 shrink-0 font-mono"
                 :model-value="numOrEmpty(field.scale)"
                 :disabled="readonly"
                 placeholder="scale"
+                :title="t('tools.scale')"
                 @update:model-value="field.scale = $event === '' ? undefined : Number($event)"
               />
               <Input
-                class="h-7 font-mono"
+                class="h-7 w-16 shrink-0 font-mono"
                 :model-value="numOrEmpty(field.bias)"
                 :disabled="readonly"
                 placeholder="bias"
                 @update:model-value="field.bias = $event === '' ? undefined : Number($event)"
               />
-              <Input v-model="field.unit" class="h-7" :placeholder="t('tools.unit')" :disabled="readonly" />
+              <Input v-model="field.unit" class="h-7 min-w-0 flex-1" :placeholder="t('tools.unit')" :disabled="readonly" />
             </div>
           </div>
-        </div>
-      </ToolFold>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <template v-else>
         <section class="space-y-2">

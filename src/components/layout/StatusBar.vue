@@ -44,6 +44,9 @@ const sshTunnels = () => {
       </template>
       <span v-else>AI</span>
     </template>
+    <template v-else-if="ui.rail === 'net'">
+      <span>{{ t("rail.net") }}</span>
+    </template>
     <template v-else-if="ui.rail === 'modbus'">
       <span>{{ t("rail.sim") }}</span>
       <span>{{ t("bar.master", { s: lab.masterStatus }) }}</span>

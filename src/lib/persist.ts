@@ -94,7 +94,7 @@ export async function restoreApp() {
         rail === "ai"
       ) {
         sessions.activateRail(rail);
-      } else if (rail === "modbus" || rail === "tools" || rail === "settings") {
+      } else if (rail === "modbus" || rail === "net" || rail === "tools" || rail === "settings") {
         ui.setRail(rail);
       } else {
         const active = sessions.activeSession;
@@ -102,6 +102,8 @@ export async function restoreApp() {
       }
     } else if ((data.rail as string | undefined) === "modbus") {
       ui.setRail("modbus");
+    } else if ((data.rail as string | undefined) === "net") {
+      ui.setRail("net");
     } else if ((data.rail as string | undefined) === "ai") {
       useSessionsStore().activateRail("ai");
     } else if ((data.rail as string | undefined) === "ssh") {

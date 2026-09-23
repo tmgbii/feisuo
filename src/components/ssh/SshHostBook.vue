@@ -4,6 +4,7 @@ import { toast } from "vue-sonner";
 import { t } from "@/i18n";
 import { errorMessage, invokeSsh, isTauri, pickLocalFiles, pickSavePath } from "@/lib/ipc";
 import { emptyAuth, emptyEndpoint } from "@/lib/protocol";
+import { decodePackText, encodePack } from "@/lib/session-pack";
 import type { SshHost } from "@/types";
 import { useHostsStore } from "@/stores/hosts";
 import { useSessionsStore } from "@/stores/sessions";
@@ -94,29 +95,37 @@ function saveEdit() {
 }
 
 async function exportHosts() {
-  const json = JSON.stringify(hosts.snapshot(), null, 2);
+  const body = await encodePack(hosts.snapshot());
   if (!isTauri()) {
-    await navigator.clipboard.writeText(json);
+    await navigator.clipboard.writeText(body);
     toast.success(t("common.copied"));
     return;
   }
-  const path = await pickSavePath("ssh-hosts.json");
+  const path = await pickSavePath("ssh-hosts.feisuo");
   if (!path) return;
-  await invokeSsh("ssh_write_local", { path, content: json });
+  await invokeSsh("ssh_write_local", { path, content: body });
 }
 
 async function importHosts() {
   try {
     let text = "";
     if (isTauri()) {
-      const files = await pickLocalFiles({ title: t("common.importHosts") });
+      const files = await pickLocalFiles({
+        title: t("common.importHosts"),
+        filters: [{ name: "Feisuo", extensions: ["feisuo", "json"] }],
+      });
       if (!files[0]) return;
       text = await invokeSsh<string>("ssh_read_local", { path: files[0] });
     } else {
       text = await navigator.clipboard.readText();
     }
-    const data = JSON.parse(text) as SshHost[];
-    hosts.importList(Array.isArray(data) ? data : []);
+    const data = await decodePackText(text);
+    const list = Array.isArray(data)
+      ? data
+      : data && typeof data === "object" && Array.isArray((data as { sshHosts?: SshHost[] }).sshHosts)
+        ? (data as { sshHosts: SshHost[] }).sshHosts
+        : [];
+    hosts.importList(list as SshHost[]);
   } catch (err) {
     toast.error(errorMessage(err));
   }

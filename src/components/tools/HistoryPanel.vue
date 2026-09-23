@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Eraser } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { t } from "@/i18n";
 import { useSessionsStore } from "@/stores/sessions";
@@ -11,7 +12,18 @@ const hasSession = computed(() => Boolean(sessions.activeSession && sessions.act
 </script>
 
 <template>
-  <div class="flex h-full flex-col">
+  <div class="flex h-full flex-col gap-2">
+    <div v-if="sessions.history.length" class="flex justify-end">
+      <Button
+        size="xs"
+        variant="outline"
+        class="text-muted-foreground hover:text-err"
+        @click="sessions.clearHistory()"
+      >
+        <Eraser class="size-3.5" />
+        {{ t("common.clear") }}
+      </Button>
+    </div>
     <div v-if="sessions.history.length === 0" class="flex flex-1 items-center justify-center text-xs text-muted-foreground">
       {{ t("composer.noHistory") }}
     </div>

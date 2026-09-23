@@ -5,6 +5,7 @@ import { BUILTIN_SCHEMAS } from "@/lib/frame-builtins";
 import { blankSchema, schemaLabel, type FrameSchema } from "@/lib/frame-schema";
 
 const BUILTIN_IDS = new Set(BUILTIN_SCHEMAS.map((s) => s.schemaId));
+const BUILTIN_ORDER = new Map(BUILTIN_SCHEMAS.map((s, i) => [s.schemaId, i]));
 
 function builtins(): FrameSchema[] {
   return BUILTIN_SCHEMAS.map((s) => JSON.parse(JSON.stringify(s)) as FrameSchema);
@@ -33,7 +34,11 @@ export const useFrameSchemasStore = defineStore("frame-schemas", () => {
   const activeId = ref(BUILTIN_SCHEMAS[0]?.schemaId ?? "");
 
   const sorted = computed(() =>
-    [...schemas.value].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name)),
+    [...schemas.value].sort((a, b) => {
+      if (a.builtin !== b.builtin) return a.builtin ? -1 : 1;
+      if (a.builtin && b.builtin) return (BUILTIN_ORDER.get(a.schemaId) ?? 0) - (BUILTIN_ORDER.get(b.schemaId) ?? 0);
+      return a.name.localeCompare(b.name, "zh");
+    }),
   );
   const active = computed(() => schemas.value.find((s) => s.schemaId === activeId.value) ?? schemas.value[0] ?? null);
 

@@ -1,7 +1,7 @@
 import type { DbEngine } from "@/types";
-import { t } from "@/i18n";
 
 export type TableSqlId =
+  | "open"
   | "preview"
   | "count"
   | "estimate"
@@ -24,40 +24,9 @@ export type TableSqlId =
   | "reindex"
   | "check";
 
-const TABLE_SQL_DEFS: { id: TableSqlId; labelKey: string; group: string }[] = [
-  { id: "preview", labelKey: "db.preview", group: "data" },
-  { id: "count", labelKey: "db.count", group: "data" },
-  { id: "estimate", labelKey: "db.estimate", group: "data" },
-  { id: "columns", labelKey: "db.columns", group: "def" },
-  { id: "indexes", labelKey: "db.indexes", group: "def" },
-  { id: "pk", labelKey: "db.pk", group: "def" },
-  { id: "fk", labelKey: "db.fk", group: "def" },
-  { id: "checks", labelKey: "db.checks", group: "def" },
-  { id: "triggers", labelKey: "db.triggers", group: "def" },
-  { id: "ddl", labelKey: "db.ddl", group: "def" },
-  { id: "comments", labelKey: "db.comments", group: "def" },
-  { id: "partitions", labelKey: "db.partitions", group: "def" },
-  { id: "size", labelKey: "db.tableSize", group: "size" },
-  { id: "indexSize", labelKey: "db.indexSize", group: "size" },
-  { id: "stats", labelKey: "db.stats", group: "stat" },
-  { id: "locks", labelKey: "db.locks", group: "stat" },
-  { id: "analyze", labelKey: "", group: "maint" },
-  { id: "vacuum", labelKey: "", group: "maint" },
-  { id: "optimize", labelKey: "", group: "maint" },
-  { id: "reindex", labelKey: "", group: "maint" },
-  { id: "check", labelKey: "", group: "maint" },
-];
-
-export function tableSqlMenu(): { id: TableSqlId; label: string; group: string }[] {
-  return TABLE_SQL_DEFS.map((item) => ({
-    id: item.id,
-    group: item.group,
-    label: item.labelKey ? t(item.labelKey) : item.id.toUpperCase(),
-  }));
-}
-
 function ident(engine: DbEngine, name: string): string {
   if (engine === "mysql") return `\`${name.replace(/`/g, "``")}\``;
+  if (engine === "sqlserver") return `[${name.replace(/]/g, "]]")}]`;
   return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -68,6 +37,7 @@ function lit(value: string): string {
 function schemaName(engine: DbEngine, schema: string): string {
   if (engine === "sqlite") return "";
   if (engine === "postgres") return schema || "public";
+  if (engine === "sqlserver") return schema || "dbo";
   return schema;
 }
 
@@ -77,8 +47,10 @@ export function tableRef(engine: DbEngine, schema: string, name: string): string
   return `${ident(engine, s)}.${ident(engine, name)}`;
 }
 
-export function tableLabel(schema: string, name: string): string {
+export function tableLabel(engine: DbEngine, schema: string, name: string): string {
+  if (engine === "mysql" || engine === "sqlite") return name;
   if (!schema || schema === "public" || schema === "main") return name;
+  if (engine === "sqlserver" && schema.toLowerCase() === "dbo") return name;
   return `${schema}.${name}`;
 }
 
@@ -88,6 +60,9 @@ export function tableSqlAvailable(engine: DbEngine, id: TableSqlId): boolean {
   }
   if (engine === "mysql") {
     return id !== "vacuum" && id !== "reindex";
+  }
+  if (engine === "sqlserver") {
+    return !["partitions", "locks", "vacuum", "optimize", "reindex", "check"].includes(id);
   }
   return !["estimate", "comments", "partitions", "locks", "vacuum", "optimize", "check"].includes(id);
 }
@@ -105,13 +80,15 @@ export function generateTableSql(
   const t = lit(name);
   if (engine === "postgres") return pgSql(rel, s, t, id);
   if (engine === "mysql") return mysqlSql(rel, t, id);
+  if (engine === "sqlserver") return mssqlSql(rel, s, t, id);
   return sqliteSql(rel, t, id);
 }
 
 function pgSql(rel: string, s: string, t: string, id: TableSqlId): string {
   switch (id) {
+    case "open":
     case "preview":
-      return `SELECT * FROM ${rel} LIMIT 100`;
+      return `SELECT * FROM ${rel}`;
     case "count":
       return `SELECT COUNT(*) AS n FROM ${rel}`;
     case "estimate":
@@ -222,14 +199,15 @@ WHERE n.nspname = ${s} AND c.relname = ${t}`;
     case "reindex":
       return `REINDEX TABLE ${rel}`;
     default:
-      return `SELECT * FROM ${rel} LIMIT 100`;
+      return `SELECT * FROM ${rel}`;
   }
 }
 
 function mysqlSql(rel: string, t: string, id: TableSqlId): string {
   switch (id) {
+    case "open":
     case "preview":
-      return `SELECT * FROM ${rel} LIMIT 100`;
+      return `SELECT * FROM ${rel}`;
     case "count":
       return `SELECT COUNT(*) AS n FROM ${rel}`;
     case "estimate":
@@ -292,14 +270,97 @@ WHERE database_name = DATABASE() AND table_name = ${t} AND stat_name = 'size'`;
     case "check":
       return `CHECK TABLE ${rel}`;
     default:
-      return `SELECT * FROM ${rel} LIMIT 100`;
+      return `SELECT * FROM ${rel}`;
+  }
+}
+
+function mssqlSql(rel: string, s: string, t: string, id: TableSqlId): string {
+  const obj = `OBJECT_ID(${s} + '.' + ${t})`;
+  switch (id) {
+    case "open":
+    case "preview":
+      return `SELECT * FROM ${rel}`;
+    case "count":
+      return `SELECT COUNT(*) AS n FROM ${rel}`;
+    case "estimate":
+      return `SELECT SUM(p.rows) AS estimate
+FROM sys.partitions p
+WHERE p.object_id = ${obj} AND p.index_id IN (0, 1)`;
+    case "columns":
+      return `SELECT c.column_id, c.name, ty.name AS type, c.max_length, c.precision, c.scale, c.is_nullable
+FROM sys.columns c
+JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+WHERE c.object_id = ${obj}
+ORDER BY c.column_id`;
+    case "indexes":
+      return `SELECT i.name, i.type_desc, i.is_unique, i.is_primary_key
+FROM sys.indexes i
+WHERE i.object_id = ${obj} AND i.name IS NOT NULL
+ORDER BY i.index_id`;
+    case "pk":
+      return `SELECT c.name, ic.key_ordinal
+FROM sys.indexes i
+JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+WHERE i.object_id = ${obj} AND i.is_primary_key = 1
+ORDER BY ic.key_ordinal`;
+    case "fk":
+      return `SELECT fk.name, COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS col,
+  OBJECT_SCHEMA_NAME(fk.referenced_object_id) AS ref_schema,
+  OBJECT_NAME(fk.referenced_object_id) AS ref_table,
+  COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS ref_col
+FROM sys.foreign_keys fk
+JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+WHERE fk.parent_object_id = ${obj} OR fk.referenced_object_id = ${obj}`;
+    case "checks":
+      return `SELECT name, definition FROM sys.check_constraints WHERE parent_object_id = ${obj}`;
+    case "triggers":
+      return `SELECT name, type_desc, is_disabled FROM sys.triggers WHERE parent_id = ${obj}`;
+    case "ddl":
+      return `SELECT c.column_id, c.name, ty.name AS type, c.max_length, c.precision, c.scale,
+  c.is_nullable, c.is_identity
+FROM sys.columns c
+JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+WHERE c.object_id = ${obj}
+ORDER BY c.column_id`;
+    case "comments":
+      return `SELECT c.name, CAST(ep.value AS nvarchar(4000)) AS comment
+FROM sys.columns c
+LEFT JOIN sys.extended_properties ep
+  ON ep.major_id = c.object_id AND ep.minor_id = c.column_id AND ep.name = N'MS_Description'
+WHERE c.object_id = ${obj}
+ORDER BY c.column_id`;
+    case "size":
+      return `SELECT
+  SUM(a.total_pages) * 8 AS total_kb,
+  SUM(a.used_pages) * 8 AS used_kb
+FROM sys.partitions p
+JOIN sys.allocation_units a ON a.container_id = p.partition_id
+WHERE p.object_id = ${obj}`;
+    case "indexSize":
+      return `SELECT i.name, SUM(a.used_pages) * 8 AS used_kb
+FROM sys.indexes i
+JOIN sys.partitions p ON p.object_id = i.object_id AND p.index_id = i.index_id
+JOIN sys.allocation_units a ON a.container_id = p.partition_id
+WHERE i.object_id = ${obj}
+GROUP BY i.name`;
+    case "stats":
+      return `SELECT i.name, s.last_updated, s.unfiltered_rows, s.rows, s.modification_counter
+FROM sys.stats s
+JOIN sys.indexes i ON i.object_id = s.object_id AND i.index_id = s.stats_id
+WHERE s.object_id = ${obj}`;
+    case "analyze":
+      return `UPDATE STATISTICS ${rel}`;
+    default:
+      return `SELECT * FROM ${rel}`;
   }
 }
 
 function sqliteSql(rel: string, t: string, id: TableSqlId): string {
   switch (id) {
+    case "open":
     case "preview":
-      return `SELECT * FROM ${rel} LIMIT 100`;
+      return `SELECT * FROM ${rel}`;
     case "count":
       return `SELECT COUNT(*) AS n FROM ${rel}`;
     case "columns":
@@ -329,6 +390,6 @@ function sqliteSql(rel: string, t: string, id: TableSqlId): string {
     case "reindex":
       return `REINDEX ${rel}`;
     default:
-      return `SELECT * FROM ${rel} LIMIT 100`;
+      return `SELECT * FROM ${rel}`;
   }
 }
